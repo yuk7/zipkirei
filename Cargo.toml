@@ -1,0 +1,20 @@
+[package]
+name = "zipkirei"
+version = "0.1.0"
+edition = "2021"
+description = "Tool to clean up ZIP archives: NFC normalization, bit 11 (UTF-8 flag), and junk file removal"
+authors = ["yuk7 <yukx00@gmail.com>"]
+license = "MIT"
+
+[[bin]]
+name = "zipkirei"
+path = "src/main.rs"
+
+[dependencies]
+unicode-normalization = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
