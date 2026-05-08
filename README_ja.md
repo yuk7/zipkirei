@@ -5,12 +5,16 @@
 文字化け、分解されたUnicodeファイル名、OSのジャンクファイルを高速に修正します。
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/yuk7/zipkirei/ci.yml?style=flat-square)](https://github.com/yuk7/zipkirei/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/yuk7/zipkirei?style=flat-square)](https://github.com/yuk7/zipkirei/releases/latest)
+[![Crates.io Version](https://img.shields.io/crates/v/zipkirei?style=flat-square)](https://crates.io/crates/zipkirei)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 ![License](https://img.shields.io/github/license/yuk7/zipkirei.svg?style=flat-square)
 
 [English](README.md)
 
 ### [⬇ ダウンロード](https://github.com/yuk7/zipkirei/releases/latest)
+[⬇ GitHub Releases](https://github.com/yuk7/zipkirei/releases/latest)
+[📦 Crates.io](https://crates.io/crates/zipkirei)
 
 ### 対応環境
 | OS      | Architecture                        |
@@ -63,7 +67,7 @@ ZIPアーカイブには、他のOSでトラブルの原因となるプラット
 
 ## パフォーマンス
 
-5GBのZIPアーカイブ（合計10,000エントリ）でテスト。
+5GBのZIPアーカイブ（合計2エントリ）でテスト。
 
 Apple M1 / 内蔵 APFS SSD
 
@@ -80,6 +84,18 @@ Apple M1 / 内蔵 APFS SSD
 |---|---|
 | **zipkirei --new** | **5.09s** |
 | `unzip` + `zip -0` | 21.18s |
+
+## インストール
+
+### バイナリをダウンロード
+1. [リリースページ](https://github.com/yuk7/zipkirei/releases/latest)から最新のバイナリをダウンロードします。
+2. アーカイブを展開し、実行ファイルに `PATH` を通してください。
+
+### cargo を使用
+Rustがインストールされている環境であれば、cargoでインストールできます。
+```bash
+cargo install zipkirei
+```
 
 ## 使い方
 

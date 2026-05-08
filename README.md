@@ -5,12 +5,16 @@ A fast CLI tool to repair problematic ZIP archives without extraction or recompr
 Fix mojibake, decomposed Unicode filenames, and OS junk entries in milliseconds.
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/yuk7/zipkirei/ci.yml?style=flat-square)](https://github.com/yuk7/zipkirei/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/yuk7/zipkirei?style=flat-square)](https://github.com/yuk7/zipkirei/releases/latest)
+[![Crates.io Version](https://img.shields.io/crates/v/zipkirei?style=flat-square)](https://crates.io/crates/zipkirei)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 ![License](https://img.shields.io/github/license/yuk7/zipkirei.svg?style=flat-square)
 
 [日本語](README_ja.md)
 
 ### [⬇ Download](https://github.com/yuk7/zipkirei/releases/latest)
+[⬇ GitHub Releases](https://github.com/yuk7/zipkirei/releases/latest)
+[📦 Crates.io](https://crates.io/crates/zipkirei)
 
 ### Supported Platforms
 | OS      | Architecture                        |
@@ -63,7 +67,7 @@ By default, `zipkirei`:
 
 ## Performance
 
-Tested with a 5GB ZIP archive (10,000 entries total).
+Tested with a 5GB ZIP archive (2 entries total).
 
 Apple M1 / Internal APFS SSD
 
@@ -80,6 +84,18 @@ Apple M1 / Internal APFS SSD
 |---|---|
 | **zipkirei --new** | **5.09s** |
 | `unzip` + `zip -0` | 21.18s |
+
+## Installation
+
+### Download binary
+1. Download the latest binary from [Releases](https://github.com/yuk7/zipkirei/releases/latest).
+2. Extract the archive and add the executable to your `PATH`.
+
+### Using cargo
+If you have Rust installed, you can install it via cargo:
+```bash
+cargo install zipkirei
+```
 
 ## Usage
 
