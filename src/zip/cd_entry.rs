@@ -2,10 +2,21 @@ use super::bytes::{read_u16, read_u32, write_u16, write_u32_slice, write_u64_sli
 use super::plan::EntryPlan;
 use super::{checked_u16, with_bit11, ZIP64_EXTRA_FIELD_ID};
 
+#[cfg(test)]
 pub(crate) fn build_cd_entry(p: &EntryPlan, new_lhf_offset: u64) -> Result<Vec<u8>, String> {
+    let mut out =
+        Vec::with_capacity(46 + p.new_fname.len() + p.cd_extra.len() + p.cd_comment.len());
+    build_cd_entry_into(p, new_lhf_offset, &mut out)?;
+    Ok(out)
+}
+
+pub(crate) fn build_cd_entry_into(
+    p: &EntryPlan,
+    new_lhf_offset: u64,
+    out: &mut Vec<u8>,
+) -> Result<usize, String> {
+    let start = out.len();
     let mut header = p.cd_header;
-    let orig_extra_len = p.cd_extra.len();
-    let comment_len = p.cd_comment.len();
 
     let flags = with_bit11(read_u16(&header, 8), p.new_bit11_set);
     write_u16(&mut header, 8, flags);
@@ -15,26 +26,27 @@ pub(crate) fn build_cd_entry(p: &EntryPlan, new_lhf_offset: u64) -> Result<Vec<u
     )?;
     write_u16(&mut header, 28, fname_len);
 
-    let mut out = Vec::with_capacity(46 + p.new_fname.len() + orig_extra_len + comment_len);
+    if !p.lhf_offset_in_zip64_extra {
+        if new_lhf_offset > 0xFFFF_FFFF {
+            return Err(format!(
+                "entry {}: LFH offset grown beyond 4 GB but no ZIP64 extra field present",
+                p.cd_index + 1
+            ));
+        }
+        write_u32_slice(&mut header, 42, new_lhf_offset as u32);
+    }
+
     out.extend_from_slice(&header);
     out.extend_from_slice(&p.new_fname);
 
-    let mut extra = p.cd_extra.clone();
+    let extra_start = out.len();
+    out.extend_from_slice(&p.cd_extra);
     if p.lhf_offset_in_zip64_extra {
-        patch_zip64_lhf_offset_in_extra(&mut extra, new_lhf_offset, p)?;
-    } else if new_lhf_offset <= 0xFFFF_FFFF {
-        write_u32_slice(&mut out, 42, new_lhf_offset as u32);
-    } else {
-        return Err(format!(
-            "entry {}: LFH offset grown beyond 4 GB but no ZIP64 extra field present",
-            p.cd_index + 1
-        ));
+        patch_zip64_lhf_offset_in_extra(&mut out[extra_start..], new_lhf_offset, p)?;
     }
-
-    out.extend_from_slice(&extra);
     out.extend_from_slice(&p.cd_comment);
 
-    Ok(out)
+    Ok(out.len() - start)
 }
 
 fn patch_zip64_lhf_offset_in_extra(

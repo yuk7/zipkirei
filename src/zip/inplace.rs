@@ -1,12 +1,17 @@
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Seek, SeekFrom, Write};
+
+#[cfg(not(unix))]
+use std::io::Read;
 
 use super::bytes::{read_u16, write_u16};
-use super::cd_entry::build_cd_entry;
+use super::cd_entry::build_cd_entry_into;
 use super::copy::copy_within_file_with_buf;
+#[cfg(unix)]
+use super::copy::{read_exact_at, write_all_at};
 use super::eocd::{find_archive_info, write_eocd, write_zip64_eocd, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::options::Options;
-use super::plan::{build_plans, EntryPlan};
+use super::plan::{build_plans, cd_order, EntryPlan};
 use super::{
     checked_u16, dry_run_report, io_err, with_bit11, Error, ZipResult, MIN_PADDING,
     PADDING_EXTRA_FIELD_ID,
@@ -93,22 +98,26 @@ fn inplace_patch(
             let new_lhf_off = write_pos;
             new_lhf_offsets[i] = Some(new_lhf_off);
 
-            let lhf = LocalHeader::read(f, p.lhf_offset, p.cd_index + 1)?;
+            let lhf = read_local_header(f, p.lhf_offset, p.cd_index + 1)?;
             let new_flags = with_bit11(read_u16(&lhf.header, 6), p.new_bit11_set);
             let new_extra_len = checked_u16(
                 p.lhf_extra_len as u64 + absorb,
                 "LFH extra field length exceeds ZIP limit",
             )?;
 
-            f.seek(SeekFrom::Start(new_lhf_off)).map_err(io_err)?;
             let header = lhf.patched_header(new_flags, p.new_fname.len(), new_extra_len)?;
-            f.write_all(&header).map_err(io_err)?;
-            f.write_all(&p.new_fname).map_err(io_err)?;
+            let mut header_buf = Vec::with_capacity(30 + p.new_fname.len() + 4);
+            header_buf.extend_from_slice(&header);
+            header_buf.extend_from_slice(&p.new_fname);
+            append_padding_extra_header(&mut header_buf, absorb)?;
+            let mut header_pos = new_lhf_off;
+            write_all_at_portable(f, &header_buf, header_pos)?;
+            header_pos += header_buf.len() as u64;
 
-            // Write a proper, independent Padding Extra Field (0xFFFF)
-            write_padding_extra(f, absorb)?;
+            // Write a proper, independent Padding Extra Field (0xFFFF).
+            header_pos = write_padding_extra_data_at(f, header_pos, absorb, &mut copy_buf)?;
             // Keep original extra fields intact and untouched
-            f.write_all(&lhf.extra).map_err(io_err)?;
+            write_all_at_portable(f, &lhf.extra, header_pos)?;
 
             let data_src = p.lhf_offset + p.lhf_header_size;
             let new_header_size = 30 + p.new_fname.len() as u64 + new_extra_len as u64;
@@ -123,27 +132,26 @@ fn inplace_patch(
         } else if carry == 0 && delta == 0 {
             new_lhf_offsets[i] = Some(p.lhf_offset);
 
-            f.seek(SeekFrom::Start(p.lhf_offset + 6)).map_err(io_err)?;
             let mut flags_buf = [0u8; 2];
-            f.read_exact(&mut flags_buf).map_err(io_err)?;
+            read_exact_at_portable(f, &mut flags_buf, p.lhf_offset + 6)?;
             let new_flags = with_bit11(read_u16(&flags_buf, 0), p.new_bit11_set);
-            f.seek(SeekFrom::Start(p.lhf_offset + 6)).map_err(io_err)?;
-            f.write_all(&new_flags.to_le_bytes()).map_err(io_err)?;
+            write_all_at_portable(f, &new_flags.to_le_bytes(), p.lhf_offset + 6)?;
 
             write_pos = p.lhf_offset + p.span_size;
         } else {
             let new_lhf_off = p.lhf_offset - carry;
             new_lhf_offsets[i] = Some(new_lhf_off);
 
-            let lhf = LocalHeader::read(f, p.lhf_offset, p.cd_index + 1)?;
+            let lhf = read_local_header(f, p.lhf_offset, p.cd_index + 1)?;
             let new_flags = with_bit11(read_u16(&lhf.header, 6), p.new_bit11_set);
 
-            f.seek(SeekFrom::Start(new_lhf_off)).map_err(io_err)?;
             let extra_len = checked_u16(
                 lhf.extra_len() as u64,
                 "LFH extra field length exceeds ZIP limit",
             )?;
-            lhf.write(f, &p.new_fname, new_flags, extra_len)?;
+            let mut header_buf = Vec::with_capacity(30 + p.new_fname.len() + lhf.extra_len());
+            lhf.write(&mut header_buf, &p.new_fname, new_flags, extra_len)?;
+            write_all_at_portable(f, &header_buf, new_lhf_off)?;
 
             let data_src = p.lhf_offset + p.lhf_header_size;
             let new_header_size = 30 + p.new_fname.len() as u64 + lhf.extra_len() as u64;
@@ -157,12 +165,11 @@ fn inplace_patch(
 
     let new_cd_start = write_pos;
 
-    f.seek(SeekFrom::Start(new_cd_start)).map_err(io_err)?;
+    let mut cd_buf = Vec::with_capacity(super::COPY_BUF_SIZE.min(1024 * 1024));
     let mut cd_write_pos = new_cd_start;
     let mut cd_entries_written: u64 = 0;
 
-    let mut cd_order: Vec<usize> = (0..plans.len()).collect();
-    cd_order.sort_by_key(|&i| plans[i].cd_index);
+    let cd_order = cd_order(plans)?;
 
     for i in cd_order {
         let p = &plans[i];
@@ -171,12 +178,21 @@ fn inplace_patch(
         }
         let new_lhf = new_lhf_offsets[i]
             .ok_or_else(|| format!("missing LFH offset for CD entry {}", p.cd_index + 1))?;
-        let cd_bytes = build_cd_entry(p, new_lhf)?;
-        f.write_all(&cd_bytes).map_err(io_err)?;
-        cd_write_pos += cd_bytes.len() as u64;
+        let before_len = cd_buf.len();
+        build_cd_entry_into(p, new_lhf, &mut cd_buf)?;
+        if cd_buf.len() > super::COPY_BUF_SIZE {
+            if before_len == 0 {
+                flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
+            } else {
+                let cd_bytes = cd_buf.split_off(before_len);
+                flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
+                append_positioned(&mut cd_buf, f, &cd_bytes, &mut cd_write_pos)?;
+            }
+        }
         cd_entries_written += 1;
     }
 
+    flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
     let cd_size = cd_write_pos - new_cd_start;
     let needs_zip64 = info.is_zip64
         || cd_entries_written > 0xFFFF
@@ -184,17 +200,20 @@ fn inplace_patch(
         || new_cd_start > 0xFFFF_FFFF;
 
     if needs_zip64 {
+        let mut eocd = Cursor::new(Vec::new());
         write_zip64_eocd(
-            f,
+            &mut eocd,
             &mut cd_write_pos,
             cd_entries_written,
             cd_size,
             new_cd_start,
             &info.archive_comment,
         )?;
+        write_all_at_portable(f, eocd.get_ref(), new_cd_start + cd_size)?;
     } else {
+        let mut eocd = Vec::new();
         write_eocd(
-            f,
+            &mut eocd,
             checked_u16(
                 cd_entries_written,
                 "central directory entry count exceeds ZIP limit",
@@ -203,29 +222,126 @@ fn inplace_patch(
             new_cd_start as u32,
             &info.archive_comment,
         )?;
+        cd_write_pos += eocd.len() as u64;
+        write_all_at_portable(f, &eocd, new_cd_start + cd_size)?;
     }
 
-    let new_file_len = f.stream_position().map_err(io_err)?;
-    f.set_len(new_file_len)
+    f.set_len(cd_write_pos)
         .map_err(|e| format!("truncate failed: {}", e))?;
 
     Ok(())
 }
 
-fn write_padding_extra<W: Write>(w: &mut W, absorb: u64) -> Result<(), String> {
+fn read_local_header(
+    f: &mut std::fs::File,
+    offset: u64,
+    entry_no: usize,
+) -> Result<LocalHeader, String> {
+    #[cfg(unix)]
+    {
+        LocalHeader::read_from_file(f, offset, entry_no)
+    }
+
+    #[cfg(not(unix))]
+    {
+        LocalHeader::read(f, offset, entry_no)
+    }
+}
+
+fn read_exact_at_portable(
+    f: &mut std::fs::File,
+    buf: &mut [u8],
+    offset: u64,
+) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        read_exact_at(f, buf, offset)
+    }
+
+    #[cfg(not(unix))]
+    {
+        f.seek(SeekFrom::Start(offset)).map_err(io_err)?;
+        f.read_exact(buf).map_err(io_err)
+    }
+}
+
+fn write_all_at_portable(f: &mut std::fs::File, buf: &[u8], offset: u64) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        write_all_at(f, buf, offset)
+    }
+
+    #[cfg(not(unix))]
+    {
+        f.seek(SeekFrom::Start(offset)).map_err(io_err)?;
+        f.write_all(buf).map_err(io_err)
+    }
+}
+
+fn append_padding_extra_header(out: &mut Vec<u8>, absorb: u64) -> Result<(), String> {
     debug_assert!(absorb >= MIN_PADDING);
     let data_len = absorb - 4;
     let data_len_u16 = checked_u16(data_len, "padding extra field exceeds ZIP limit")?;
     let mut hdr = [0u8; 4];
     write_u16(&mut hdr, 0, PADDING_EXTRA_FIELD_ID);
     write_u16(&mut hdr, 2, data_len_u16);
-    w.write_all(&hdr).map_err(io_err)?;
-    let zeros = [0u8; 8192];
+    out.extend_from_slice(&hdr);
+    Ok(())
+}
+
+fn write_padding_extra_data_at(
+    f: &mut std::fs::File,
+    mut pos: u64,
+    absorb: u64,
+    zero_buf: &mut [u8],
+) -> Result<u64, String> {
+    debug_assert!(absorb >= MIN_PADDING);
+    let data_len = absorb - 4;
+
+    if zero_buf.is_empty() {
+        return Err("padding write buffer is empty".into());
+    }
+    zero_buf.fill(0);
     let mut remaining = data_len;
     while remaining > 0 {
-        let to_write = remaining.min(zeros.len() as u64) as usize;
-        w.write_all(&zeros[..to_write]).map_err(io_err)?;
+        let to_write = remaining.min(zero_buf.len() as u64) as usize;
+        write_all_at_portable(f, &zero_buf[..to_write], pos)?;
+        pos += to_write as u64;
         remaining -= to_write as u64;
     }
+    Ok(pos)
+}
+
+fn append_positioned(
+    buf: &mut Vec<u8>,
+    f: &mut std::fs::File,
+    bytes: &[u8],
+    write_pos: &mut u64,
+) -> Result<(), String> {
+    if bytes.len() > super::COPY_BUF_SIZE {
+        flush_positioned(buf, f, write_pos)?;
+        write_all_at_portable(f, bytes, *write_pos)?;
+        *write_pos += bytes.len() as u64;
+        return Ok(());
+    }
+
+    if buf.len() + bytes.len() > super::COPY_BUF_SIZE {
+        flush_positioned(buf, f, write_pos)?;
+    }
+    buf.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn flush_positioned(
+    buf: &mut Vec<u8>,
+    f: &mut std::fs::File,
+    write_pos: &mut u64,
+) -> Result<(), String> {
+    if buf.is_empty() {
+        return Ok(());
+    }
+    write_all_at_portable(f, buf, *write_pos)?;
+    *write_pos += buf.len() as u64;
+    buf.clear();
     Ok(())
 }

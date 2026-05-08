@@ -54,6 +54,23 @@ impl EntryPlan {
     }
 }
 
+pub(crate) fn cd_order(plans: &[EntryPlan]) -> Result<Vec<usize>, String> {
+    let mut order = vec![usize::MAX; plans.len()];
+    for (physical_index, p) in plans.iter().enumerate() {
+        if p.cd_index >= plans.len() {
+            return Err(format!("CD entry index {} is out of range", p.cd_index + 1));
+        }
+        if order[p.cd_index] != usize::MAX {
+            return Err(format!("duplicate CD entry index {}", p.cd_index + 1));
+        }
+        order[p.cd_index] = physical_index;
+    }
+    if let Some(missing) = order.iter().position(|&i| i == usize::MAX) {
+        return Err(format!("missing CD entry index {}", missing + 1));
+    }
+    Ok(order)
+}
+
 pub(crate) fn build_plans<R: Read + Seek>(
     r: &mut R,
     info: &ArchiveInfo,

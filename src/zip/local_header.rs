@@ -1,6 +1,8 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use super::bytes::{read_u16, read_u32, write_u16};
+#[cfg(unix)]
+use super::copy::read_exact_at;
 use super::{checked_u16, io_err, LOCAL_FILE_HEADER_SIG};
 
 pub(super) struct LocalHeader {
@@ -32,6 +34,31 @@ impl LocalHeader {
 
         let mut extra = vec![0u8; extra_len];
         r.read_exact(&mut extra)
+            .map_err(|_| format!("unexpected EOF reading LFH extra at entry {}", entry_no))?;
+
+        Ok(Self { header, extra })
+    }
+
+    #[cfg(unix)]
+    pub(super) fn read_from_file(
+        f: &std::fs::File,
+        offset: u64,
+        entry_no: usize,
+    ) -> Result<Self, String> {
+        let mut header = [0u8; 30];
+        read_exact_at(f, &mut header, offset)
+            .map_err(|_| format!("unexpected EOF reading LFH at entry {}", entry_no))?;
+        if read_u32(&header, 0) != LOCAL_FILE_HEADER_SIG {
+            return Err(format!(
+                "invalid LFH signature at entry {} (offset {:#x})",
+                entry_no, offset
+            ));
+        }
+
+        let fname_len = read_u16(&header, 26) as u64;
+        let extra_len = read_u16(&header, 28) as usize;
+        let mut extra = vec![0u8; extra_len];
+        read_exact_at(f, &mut extra, offset + 30 + fname_len)
             .map_err(|_| format!("unexpected EOF reading LFH extra at entry {}", entry_no))?;
 
         Ok(Self { header, extra })

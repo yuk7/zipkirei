@@ -1,11 +1,11 @@
 use std::io::{Read, Seek, Write};
 
 use super::bytes::read_u16;
-use super::cd_entry::build_cd_entry;
+use super::cd_entry::build_cd_entry_into;
 use super::copy::stream_copy;
 use super::eocd::{write_eocd, write_zip64_eocd, ArchiveInfo};
 use super::local_header::LocalHeader;
-use super::plan::EntryPlan;
+use super::plan::{cd_order, EntryPlan};
 use super::{checked_u16, io_err, with_bit11};
 
 pub(super) fn write_new_archive<R, W>(
@@ -44,9 +44,9 @@ where
 
     let cd_start = write_pos;
     let mut cd_entries_written: u64 = 0;
+    let mut cd_bytes = Vec::new();
 
-    let mut cd_order: Vec<usize> = (0..plans.len()).collect();
-    cd_order.sort_by_key(|&i| plans[i].cd_index);
+    let cd_order = cd_order(plans)?;
 
     for i in cd_order {
         let p = &plans[i];
@@ -55,9 +55,11 @@ where
         }
         let new_lhf = new_lhf_offsets[i]
             .ok_or_else(|| format!("missing LFH offset for CD entry {}", p.cd_index + 1))?;
-        let cd_bytes = build_cd_entry(p, new_lhf)?;
+        cd_bytes.clear();
+        cd_bytes.reserve(46 + p.new_fname.len() + p.cd_extra.len() + p.cd_comment.len());
+        let cd_len = build_cd_entry_into(p, new_lhf, &mut cd_bytes)?;
         w.write_all(&cd_bytes).map_err(io_err)?;
-        write_pos += cd_bytes.len() as u64;
+        write_pos += cd_len as u64;
         cd_entries_written += 1;
     }
 
