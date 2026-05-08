@@ -156,17 +156,9 @@ pub(super) fn write_eocd<W: Write>(
     cd_offset: u32,
     comment: &[u8],
 ) -> Result<(), String> {
-    let comment_len = u16::try_from(comment.len())
-        .map_err(|_| "archive comment is too long for EOCD".to_string())?;
-    let mut buf = [0u8; 22];
-    write_u32(&mut buf, 0, EOCD_SIG);
-    write_u16(&mut buf, 8, entries);
-    write_u16(&mut buf, 10, entries);
-    write_u32(&mut buf, 12, cd_size);
-    write_u32(&mut buf, 16, cd_offset);
-    write_u16(&mut buf, 20, comment_len);
-    w.write_all(&buf).map_err(io_err)?;
-    w.write_all(comment).map_err(io_err)
+    let mut buf = Vec::with_capacity(22 + comment.len());
+    build_eocd_into(&mut buf, entries, cd_size, cd_offset, comment)?;
+    w.write_all(&buf).map_err(io_err)
 }
 
 pub(super) fn write_zip64_eocd<W: Write + Seek>(
@@ -178,6 +170,43 @@ pub(super) fn write_zip64_eocd<W: Write + Seek>(
     comment: &[u8],
 ) -> Result<(), String> {
     let z64_eocd_off = *pos;
+    let mut buf = Vec::with_capacity(56 + 20 + 22 + comment.len());
+    build_zip64_eocd_into(&mut buf, z64_eocd_off, entries, cd_size, cd_offset, comment)?;
+    w.write_all(&buf).map_err(io_err)?;
+    *pos += buf.len() as u64;
+
+    Ok(())
+}
+
+pub(super) fn build_eocd_into(
+    out: &mut Vec<u8>,
+    entries: u16,
+    cd_size: u32,
+    cd_offset: u32,
+    comment: &[u8],
+) -> Result<(), String> {
+    let comment_len = u16::try_from(comment.len())
+        .map_err(|_| "archive comment is too long for EOCD".to_string())?;
+    let mut eocd = [0u8; 22];
+    write_u32(&mut eocd, 0, EOCD_SIG);
+    write_u16(&mut eocd, 8, entries);
+    write_u16(&mut eocd, 10, entries);
+    write_u32(&mut eocd, 12, cd_size);
+    write_u32(&mut eocd, 16, cd_offset);
+    write_u16(&mut eocd, 20, comment_len);
+    out.extend_from_slice(&eocd);
+    out.extend_from_slice(comment);
+    Ok(())
+}
+
+pub(super) fn build_zip64_eocd_into(
+    out: &mut Vec<u8>,
+    z64_eocd_off: u64,
+    entries: u64,
+    cd_size: u64,
+    cd_offset: u64,
+    comment: &[u8],
+) -> Result<(), String> {
     let mut z64 = [0u8; 56];
     write_u32(&mut z64, 0, ZIP64_EOCD_SIG);
     write_u64(&mut z64, 4, 44u64);
@@ -187,15 +216,13 @@ pub(super) fn write_zip64_eocd<W: Write + Seek>(
     write_u64(&mut z64, 32, entries);
     write_u64(&mut z64, 40, cd_size);
     write_u64(&mut z64, 48, cd_offset);
-    w.write_all(&z64).map_err(io_err)?;
-    *pos += 56;
+    out.extend_from_slice(&z64);
 
     let mut loc = [0u8; 20];
     write_u32(&mut loc, 0, ZIP64_EOCD_LOCATOR_SIG);
     write_u64(&mut loc, 8, z64_eocd_off);
     write_u32(&mut loc, 16, 1);
-    w.write_all(&loc).map_err(io_err)?;
-    *pos += 20;
+    out.extend_from_slice(&loc);
 
     let comment_len = u16::try_from(comment.len())
         .map_err(|_| "archive comment is too long for EOCD".to_string())?;
@@ -207,10 +234,8 @@ pub(super) fn write_zip64_eocd<W: Write + Seek>(
     write_u32(&mut eocd, 12, 0xFFFF_FFFF);
     write_u32(&mut eocd, 16, 0xFFFF_FFFF);
     write_u16(&mut eocd, 20, comment_len);
-    w.write_all(&eocd).map_err(io_err)?;
-    *pos += 22;
-    w.write_all(comment).map_err(io_err)?;
-    *pos += comment.len() as u64;
+    out.extend_from_slice(&eocd);
+    out.extend_from_slice(comment);
 
     Ok(())
 }

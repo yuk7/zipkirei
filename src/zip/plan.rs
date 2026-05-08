@@ -1,6 +1,6 @@
 use std::io::{Read, Seek, SeekFrom};
 
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{is_nfc, UnicodeNormalization};
 
 use super::bytes::{read_u16, read_u32, read_u64};
 use super::eocd::ArchiveInfo;
@@ -261,6 +261,11 @@ fn nfc_normalize(raw: &[u8], entry_no: u64) -> Result<Vec<u8>, String> {
             entry_no
         )
     })?;
+
+    if is_nfc(s) {
+        return Ok(raw.to_vec());
+    }
+
     let nfc: String = s.nfc().collect();
     let new_bytes = nfc.into_bytes();
     if new_bytes.len() > raw.len() {

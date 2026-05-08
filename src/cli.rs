@@ -1,6 +1,6 @@
 use crate::zip::{self, Options};
 use std::fs::{File, OpenOptions};
-use std::io::{Cursor, Seek, SeekFrom};
+use std::io::{BufWriter, Cursor, Seek, SeekFrom, Write};
 
 struct CliArgs {
     zip_path: String,
@@ -130,12 +130,16 @@ fn process_to_new_file(
             .map_err(|e| e.to_string());
     }
 
-    let mut output = OpenOptions::new()
+    let output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(out_path)
         .map_err(|e| format!("cannot create '{}': {}", out_path, e))?;
-    zip::process_new(&mut input, file_len, &mut output, opts, stdout).map_err(|e| e.to_string())
+    let mut output = BufWriter::new(output);
+    zip::process_new(&mut input, file_len, &mut output, opts, stdout).map_err(|e| e.to_string())?;
+    output
+        .flush()
+        .map_err(|e| format!("write error for '{}': {}", out_path, e))
 }
 
 fn read_option_value<'a>(

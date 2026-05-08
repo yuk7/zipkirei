@@ -1,4 +1,4 @@
-use std::io::{Cursor, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 
 #[cfg(not(unix))]
 use std::io::Read;
@@ -8,7 +8,7 @@ use super::cd_entry::build_cd_entry_into;
 use super::copy::copy_within_file_with_buf;
 #[cfg(unix)]
 use super::copy::{read_exact_at, write_all_at};
-use super::eocd::{find_archive_info, write_eocd, write_zip64_eocd, ArchiveInfo};
+use super::eocd::{build_eocd_into, build_zip64_eocd_into, find_archive_info, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::options::Options;
 use super::plan::{build_plans, cd_order, EntryPlan};
@@ -16,6 +16,8 @@ use super::{
     checked_u16, dry_run_report, io_err, with_bit11, Error, ZipResult, MIN_PADDING,
     PADDING_EXTRA_FIELD_ID,
 };
+
+const COALESCE_PADDING_LIMIT: u64 = 64 * 1024;
 
 /// In-place processing with full read+write access.
 pub fn process_file(path: &str, opts: &Options, stdout: &mut impl Write) -> ZipResult<()> {
@@ -58,6 +60,7 @@ fn inplace_patch(
     let mut first = true;
     let mut new_lhf_offsets: Vec<Option<u64>> = vec![None; plans.len()];
     let mut copy_buf = vec![0u8; super::COPY_BUF_SIZE];
+    let mut header_buf = Vec::new();
 
     for (i, p) in plans.iter().enumerate() {
         if p.excluded {
@@ -106,18 +109,27 @@ fn inplace_patch(
             )?;
 
             let header = lhf.patched_header(new_flags, p.new_fname.len(), new_extra_len)?;
-            let mut header_buf = Vec::with_capacity(30 + p.new_fname.len() + 4);
+            header_buf.clear();
+            header_buf.reserve(30 + p.new_fname.len() + 4);
             header_buf.extend_from_slice(&header);
             header_buf.extend_from_slice(&p.new_fname);
             append_padding_extra_header(&mut header_buf, absorb)?;
             let mut header_pos = new_lhf_off;
-            write_all_at_portable(f, &header_buf, header_pos)?;
-            header_pos += header_buf.len() as u64;
+            let padding_data_len = absorb - MIN_PADDING;
 
-            // Write a proper, independent Padding Extra Field (0xFFFF).
-            header_pos = write_padding_extra_data_at(f, header_pos, absorb, &mut copy_buf)?;
-            // Keep original extra fields intact and untouched
-            write_all_at_portable(f, &lhf.extra, header_pos)?;
+            if padding_data_len <= COALESCE_PADDING_LIMIT {
+                header_buf.resize(header_buf.len() + padding_data_len as usize, 0);
+                header_buf.extend_from_slice(&lhf.extra);
+                write_all_at_portable(f, &header_buf, header_pos)?;
+            } else {
+                write_all_at_portable(f, &header_buf, header_pos)?;
+                header_pos += header_buf.len() as u64;
+
+                // Write a proper, independent Padding Extra Field (0xFFFF).
+                header_pos = write_padding_extra_data_at(f, header_pos, absorb, &mut copy_buf)?;
+                // Keep original extra fields intact and untouched.
+                write_all_at_portable(f, &lhf.extra, header_pos)?;
+            }
 
             let data_src = p.lhf_offset + p.lhf_header_size;
             let new_header_size = 30 + p.new_fname.len() as u64 + new_extra_len as u64;
@@ -149,7 +161,8 @@ fn inplace_patch(
                 lhf.extra_len() as u64,
                 "LFH extra field length exceeds ZIP limit",
             )?;
-            let mut header_buf = Vec::with_capacity(30 + p.new_fname.len() + lhf.extra_len());
+            header_buf.clear();
+            header_buf.reserve(30 + p.new_fname.len() + lhf.extra_len());
             lhf.write(&mut header_buf, &p.new_fname, new_flags, extra_len)?;
             write_all_at_portable(f, &header_buf, new_lhf_off)?;
 
@@ -200,19 +213,20 @@ fn inplace_patch(
         || new_cd_start > 0xFFFF_FFFF;
 
     if needs_zip64 {
-        let mut eocd = Cursor::new(Vec::new());
-        write_zip64_eocd(
+        let mut eocd = Vec::with_capacity(56 + 20 + 22 + info.archive_comment.len());
+        build_zip64_eocd_into(
             &mut eocd,
-            &mut cd_write_pos,
+            new_cd_start + cd_size,
             cd_entries_written,
             cd_size,
             new_cd_start,
             &info.archive_comment,
         )?;
-        write_all_at_portable(f, eocd.get_ref(), new_cd_start + cd_size)?;
+        write_all_at_portable(f, &eocd, new_cd_start + cd_size)?;
+        cd_write_pos += eocd.len() as u64;
     } else {
-        let mut eocd = Vec::new();
-        write_eocd(
+        let mut eocd = Vec::with_capacity(22 + info.archive_comment.len());
+        build_eocd_into(
             &mut eocd,
             checked_u16(
                 cd_entries_written,
