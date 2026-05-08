@@ -41,13 +41,13 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/zipbit11 dist/zipbit11
-          tar -C dist -czf zipbit11-${{ matrix.target }}.${{ matrix.archive_ext }} zipbit11
+          cp target/${{ matrix.target }}/release/zipkirei dist/zipkirei
+          tar -C dist -czf zipkirei-${{ matrix.target }}.${{ matrix.archive_ext }} zipkirei
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: zipbit11-${{ matrix.target }}
-          path: zipbit11-${{ matrix.target }}.${{ matrix.archive_ext }}
+          name: zipkirei-${{ matrix.target }}
+          path: zipkirei-${{ matrix.target }}.${{ matrix.archive_ext }}
 
   build-linux:
     name: ${{ matrix.label }}
@@ -85,13 +85,13 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/zipbit11 dist/zipbit11
-          tar -C dist -czf zipbit11-${{ matrix.target }}.tar.gz zipbit11
+          cp target/${{ matrix.target }}/release/zipkirei dist/zipkirei
+          tar -C dist -czf zipkirei-${{ matrix.target }}.tar.gz zipkirei
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: zipbit11-${{ matrix.target }}
-          path: zipbit11-${{ matrix.target }}.tar.gz
+          name: zipkirei-${{ matrix.target }}
+          path: zipkirei-${{ matrix.target }}.tar.gz
 
   build-windows:
     name: ${{ matrix.label }}
@@ -135,14 +135,14 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/zipbit11.exe dist/zipbit11.exe
+          cp target/${{ matrix.target }}/release/zipkirei.exe dist/zipkirei.exe
           cd dist
-          zip ../zipbit11-${{ matrix.target }}.zip zipbit11.exe
+          zip ../zipkirei-${{ matrix.target }}.zip zipkirei.exe
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: zipbit11-${{ matrix.target }}
-          path: zipbit11-${{ matrix.target }}.zip
+          name: zipkirei-${{ matrix.target }}
+          path: zipkirei-${{ matrix.target }}.zip
 
   publish-release:
     name: Publish Release
@@ -162,7 +162,7 @@ jobs:
           mkdir -p dist/raw
           gh run download "${{ github.run_id }}" \
             --repo "${{ github.repository }}" \
-            --pattern "zipbit11-*" \
+            --pattern "zipkirei-*" \
             --dir dist/raw
           find dist/raw -type f -exec cp {} dist/ \;
       - name: Publish GitHub release
