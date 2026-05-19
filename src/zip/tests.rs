@@ -1361,6 +1361,37 @@ fn preserves_already_nfc_names_and_sets_bit11() {
 }
 
 #[test]
+fn process_new_leaves_ascii_names_without_bit11() {
+    let name = b"ascii.txt";
+    let mut zip = Vec::new();
+    let off = append_lfh(&mut zip, name, b"data");
+    let cd_off = zip.len() as u64;
+    let cd = make_cd_entry_raw(name, &[], &[], 0, 4, 4, off as u32);
+    zip.extend_from_slice(&cd);
+    zip.extend_from_slice(&make_eocd(0, 0, 1, 1, cd.len() as u32, cd_off as u32, 0));
+
+    let mut input = Cursor::new(zip.clone());
+    let mut output = Cursor::new(Vec::new());
+    process_new(
+        &mut input,
+        zip.len() as u64,
+        &mut output,
+        &make_options(),
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let out = output.into_inner();
+    let mut file = Cursor::new(out);
+    let len = file.get_ref().len() as u64;
+    let info = find_archive_info(&mut file, len).unwrap();
+    let plans = build_plans(&mut file, &info, &make_options()).unwrap();
+
+    assert_eq!(plans[0].new_fname, name);
+    assert!(!plans[0].new_bit11_set);
+}
+
+#[test]
 fn process_new_handles_empty_archive() {
     let eocd = make_eocd(0, 0, 0, 0, 0, 0, 0);
     let mut input = Cursor::new(eocd.to_vec());
@@ -1568,7 +1599,7 @@ fn inplace_preserves_archive_comment() {
 }
 
 #[test]
-fn inplace_only_patches_flags_if_no_shrinkage() {
+fn inplace_leaves_ascii_archive_untouched_if_no_shrinkage() {
     let src = unique_temp_path("inplace-no-move.zip");
     let name = b"no-change.txt";
     let payload = b"data";
@@ -1584,8 +1615,8 @@ fn inplace_only_patches_flags_if_no_shrinkage() {
     process_file(src.to_str().unwrap(), &make_options(), &mut output).unwrap();
 
     let zip_after = fs::read(&src).unwrap();
-    // Bit 11 should be set in flags (offset 6 in LFH, offset 8 in CD)
-    assert!(read_u16(&zip_after, off as usize + 6) & BIT11 != 0);
+    assert_eq!(zip_after, zip);
+    assert_eq!(read_u16(&zip_after, off as usize + 6) & BIT11, 0);
 
     // The rest of the file (name and payload) should be untouched and in the same place
     assert_eq!(

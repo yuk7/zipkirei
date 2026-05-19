@@ -2,7 +2,7 @@
 name = "zipkirei"
 version = "0.1.0"
 edition = "2021"
-description = "Tool to clean up ZIP archives: NFC normalization, bit 11 (UTF-8 flag), and junk file removal"
+description = "Tool to clean up ZIP archives: NFC normalization, UTF-8 filename flags, and junk file removal"
 authors = ["yuk7 <yukx00@gmail.com>"]
 license = "MIT"
 

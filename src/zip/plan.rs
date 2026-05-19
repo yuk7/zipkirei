@@ -212,6 +212,8 @@ fn read_cd_entry_plan(
     let excluded = opts.is_excluded(&fname_buf);
     let (new_fname, new_bit11_set) = if opts.not_utf8 || excluded {
         (fname_buf.clone(), (flags & BIT11) != 0)
+    } else if fname_buf.is_ascii() {
+        (fname_buf.clone(), false)
     } else {
         (nfc_normalize(&fname_buf, entry_no)?, true)
     };

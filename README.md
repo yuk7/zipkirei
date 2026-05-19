@@ -48,8 +48,9 @@ If you've ever received a ZIP from a Mac user and seen garbled filenames or myst
 
 By default, `zipkirei`:
 
-- sets the ZIP UTF-8 flag (bit 11)
-- normalizes UTF-8 filenames from NFD → NFC
+- sets the ZIP UTF-8 flag (bit 11) for non-ASCII filenames
+- normalizes non-ASCII UTF-8 filenames from NFD → NFC
+- leaves ASCII-only filenames untouched
 - removes `.DS_Store`, `__MACOSX/*`, `Thumbs.db`, and `desktop.ini`
 
 ## Features
@@ -62,6 +63,7 @@ By default, `zipkirei`:
 - Works with password-protected ZIPs because compressed/encrypted payloads are never modified.
 - Preserves compressed payloads and CRCs
 - UTF-8 NFC normalization
+- Skips metadata writes for ASCII-only filenames
 - `--dry-run` preview mode
 - `--new` compact rewrite mode
 
@@ -109,7 +111,7 @@ zipkirei [OPTIONS] <file.zip>
 | ---------------------- | ------------------------------------------------------------ |
 | `--dry-run`            | Show planned changes without modifying the archive           |
 | `--new <outfile>`      | Write a cleaned archive to a new file                        |
-| `--not-utf-8`          | Skip UTF-8 fixes and only remove excluded entries            |
+| `--not-utf-8`          | Skip UTF-8 filename fixes and only remove excluded entries   |
 | `--no-default-exclude` | Keep `.DS_Store`, `__MACOSX`, `Thumbs.db`, and `desktop.ini` |
 | `--exclude <name>`     | Also exclude entries matching `<name>`; repeatable           |
 | `-h`, `--help`         | Show help                                                    |
@@ -208,9 +210,11 @@ For example:
 
 `zipkirei` normalizes filenames to NFC to avoid decomposed names rendering incorrectly across platforms.
 
+ASCII-only filenames are already byte-for-byte compatible with UTF-8 and common legacy ZIP filename decoding. `zipkirei` leaves them unchanged instead of setting bit 11, which avoids unnecessary metadata writes in in-place mode.
+
 ### In-place patching
 
-Since UTF-8 NFC normalization generally reduces byte length, data blocks shift forward.
+Since non-ASCII UTF-8 NFC normalization generally reduces byte length, data blocks shift forward.
 
 ```text
 writer offset < reader offset

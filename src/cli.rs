@@ -165,14 +165,15 @@ fn print_help() {
     println!("OPTIONS:");
     println!("  --dry-run             Show changes without modifying the file");
     println!("  --new <outfile>       Write output to a new file instead of in-place");
-    println!("  --not-utf-8           Skip bit 11 and NFC; only remove excluded files");
+    println!("  --not-utf-8           Skip UTF-8 filename fixes; only remove excluded files");
     println!("  --no-default-exclude  Do not exclude .DS_Store, __MACOSX, Thumbs.db, desktop.ini");
     println!("  --exclude <name>      Exclude entries whose basename matches <name> (repeatable)");
     println!("  -h, --help            Show this help");
     println!();
     println!("DEFAULT BEHAVIOUR (without --not-utf-8):");
-    println!("  • Set bit 11 (UTF-8 flag) on every entry");
+    println!("  • Set bit 11 (UTF-8 flag) on non-ASCII filenames");
     println!("  • Normalize filenames to NFC (reduces byte count for NFD-encoded names)");
+    println!("  • Leave ASCII-only filenames unchanged");
     println!("  • Remove .DS_Store, __MACOSX/*, Thumbs.db, and desktop.ini entries from the Central Directory");
     println!();
     println!("In-place mode patches the file with minimal I/O and truncates at the end.");
