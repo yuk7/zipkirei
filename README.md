@@ -214,16 +214,13 @@ ASCII-only filenames are already byte-for-byte compatible with UTF-8 and common 
 
 ### In-place patching
 
-Since non-ASCII UTF-8 NFC normalization generally reduces byte length, data blocks shift forward.
+UTF-8 NFC normalization of non-ASCII characters generally reduces the byte count, causing data to shift forward.
+This maintains the invariant `writer offset < reader offset`, enabling safe in-place repair without temporary files.
 
-```text
-writer offset < reader offset
-```
+Furthermore, by filling the freed bytes with ZIP extra fields (padding) whenever possible, `zipkirei` avoids shifting subsequent data blocks, which minimizes disk writes.
 
-This creates free space inside ZIP metadata structures. Instead of rewriting the archive to a temporary file, `zipkirei`:
-
-- shifts structures forward only
 - reuses freed bytes as ZIP extra fields (padding)
+- shifts structures forward only
 - incrementally updates offsets
 - preserves compressed payload data verbatim
 
