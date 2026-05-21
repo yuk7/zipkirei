@@ -11,7 +11,7 @@ use super::copy::{read_exact_at, write_all_at};
 use super::eocd::{build_eocd_into, build_zip64_eocd_into, find_archive_info, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::options::Options;
-use super::plan::{build_plans, cd_order, EntryPlan};
+use super::plan::{build_cd_only_plans, build_plans, cd_order, EntryPlan};
 use super::{
     checked_u16, dry_run_report, io_err, with_bit11, Error, ZipResult, MIN_PADDING,
     PADDING_EXTRA_FIELD_ID,
@@ -32,7 +32,11 @@ pub fn process_file(path: &str, opts: &Options, stdout: &mut impl Write) -> ZipR
     let file_len = f.seek(SeekFrom::End(0)).map_err(io_err)?;
 
     let info = find_archive_info(&mut f, file_len)?;
-    let plans = build_plans(&mut f, &info, opts)?;
+    let plans = if opts.fast {
+        build_cd_only_plans(&mut f, &info, opts)?
+    } else {
+        build_plans(&mut f, &info, opts)?
+    };
 
     if opts.dry_run {
         return dry_run_report(&plans, stdout).map_err(Error::from);
@@ -45,7 +49,81 @@ pub fn process_file(path: &str, opts: &Options, stdout: &mut impl Write) -> ZipR
         return Ok(());
     }
 
-    inplace_patch(&mut f, &info, &plans)?;
+    if opts.fast {
+        inplace_patch_cd_only(&mut f, &info, &plans)?;
+    } else {
+        inplace_patch(&mut f, &info, &plans)?;
+    }
+
+    Ok(())
+}
+
+fn inplace_patch_cd_only(
+    f: &mut std::fs::File,
+    info: &ArchiveInfo,
+    plans: &[EntryPlan],
+) -> Result<(), String> {
+    let mut cd_buf = Vec::with_capacity(super::COPY_BUF_SIZE.min(1024 * 1024));
+    let mut cd_write_pos = info.cd_offset;
+    let mut cd_entries_written: u64 = 0;
+
+    let cd_order = cd_order(plans)?;
+    for i in cd_order {
+        let p = &plans[i];
+        if p.excluded {
+            continue;
+        }
+        let before_len = cd_buf.len();
+        build_cd_entry_into(p, p.lhf_offset, &mut cd_buf)?;
+        if cd_buf.len() > super::COPY_BUF_SIZE {
+            if before_len == 0 {
+                flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
+            } else {
+                let cd_bytes = cd_buf.split_off(before_len);
+                flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
+                append_positioned(&mut cd_buf, f, &cd_bytes, &mut cd_write_pos)?;
+            }
+        }
+        cd_entries_written += 1;
+    }
+
+    flush_positioned(&mut cd_buf, f, &mut cd_write_pos)?;
+    let cd_size = cd_write_pos - info.cd_offset;
+    let needs_zip64 = info.is_zip64
+        || cd_entries_written > 0xFFFF
+        || cd_size > 0xFFFF_FFFF
+        || info.cd_offset > 0xFFFF_FFFF;
+
+    if needs_zip64 {
+        let mut eocd = Vec::with_capacity(56 + 20 + 22 + info.archive_comment.len());
+        build_zip64_eocd_into(
+            &mut eocd,
+            info.cd_offset + cd_size,
+            cd_entries_written,
+            cd_size,
+            info.cd_offset,
+            &info.archive_comment,
+        )?;
+        write_all_at_portable(f, &eocd, info.cd_offset + cd_size)?;
+        cd_write_pos += eocd.len() as u64;
+    } else {
+        let mut eocd = Vec::with_capacity(22 + info.archive_comment.len());
+        build_eocd_into(
+            &mut eocd,
+            checked_u16(
+                cd_entries_written,
+                "central directory entry count exceeds ZIP limit",
+            )?,
+            cd_size as u32,
+            info.cd_offset as u32,
+            &info.archive_comment,
+        )?;
+        write_all_at_portable(f, &eocd, info.cd_offset + cd_size)?;
+        cd_write_pos += eocd.len() as u64;
+    }
+
+    f.set_len(cd_write_pos)
+        .map_err(|e| format!("truncate failed: {}", e))?;
 
     Ok(())
 }

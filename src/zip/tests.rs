@@ -85,6 +85,7 @@ fn copy_within_file_handles_overlapping_forward_copy() {
 fn make_options() -> Options {
     Options {
         dry_run: false,
+        fast: false,
         not_utf8: false,
         no_default_exclude: false,
         extra_excludes: Vec::new(),
@@ -776,6 +777,33 @@ fn dry_run_report_summarizes_changes() {
 }
 
 #[test]
+fn dry_run_report_marks_unknown_excluded_size() {
+    let plans = vec![EntryPlan {
+        cd_index: 0,
+        lhf_offset: 0,
+        excluded: true,
+        orig_fname: b"__MACOSX/ghost".to_vec(),
+        new_fname: b"__MACOSX/ghost".to_vec(),
+        needs_bit11: false,
+        new_bit11_set: false,
+        span_size: 0,
+        lhf_header_size: 0,
+        lhf_extra_len: 0,
+        lhf_offset_in_zip64_extra: false,
+        cd_header: [0u8; 46],
+        cd_extra: Vec::new(),
+        cd_comment: Vec::new(),
+    }];
+
+    let mut out = Vec::new();
+    dry_run_report(&plans, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+
+    assert!(out.contains("[exclude]  __MACOSX/ghost  (? B)"));
+    assert!(out.contains("Excluded:     1 entries (orphan data: ? B)"));
+}
+
+#[test]
 fn default_excludes_match_basename_and_macosx_prefix() {
     let opts = make_options();
 
@@ -949,6 +977,32 @@ fn read_first_entry_flags(path: &Path) -> (u16, u16) {
     (lhf_flags, cd_flags)
 }
 
+fn cd_names_and_flags(path: &Path) -> Vec<(Vec<u8>, u16)> {
+    let mut file = File::open(path).unwrap();
+    let file_len = fs::metadata(path).unwrap().len();
+    let info = find_archive_info(&mut file, file_len).unwrap();
+    file.seek(SeekFrom::Start(info.cd_offset)).unwrap();
+
+    let mut entries = Vec::new();
+    for _ in 0..info.total_entries {
+        let mut cd = [0u8; 46];
+        file.read_exact(&mut cd).unwrap();
+        assert_eq!(read_u32(&cd, 0), CENTRAL_DIR_SIG);
+        let flags = read_u16(&cd, 8);
+        let name_len = read_u16(&cd, 28) as usize;
+        let extra_len = read_u16(&cd, 30) as usize;
+        let comment_len = read_u16(&cd, 32) as usize;
+
+        let mut name = vec![0u8; name_len];
+        file.read_exact(&mut name).unwrap();
+        file.seek(SeekFrom::Current((extra_len + comment_len) as i64))
+            .unwrap();
+        entries.push((name, flags));
+    }
+
+    entries
+}
+
 #[test]
 fn inplace_process_fixture_archive_stays_valid() {
     let src = manifest_archive("test.zip");
@@ -973,6 +1027,71 @@ fn inplace_process_fixture_archive_stays_valid() {
     assert!(file_len <= src_len);
 
     let _ = fs::remove_file(dst);
+}
+
+#[test]
+fn fast_mode_rewrites_only_central_directory() {
+    let kept_nfd = "e\u{301}.txt".as_bytes();
+    let excluded = b"__MACOSX/ghost";
+    let later = b"later.txt";
+
+    let mut zip = Vec::new();
+    let kept_offset = append_lfh(&mut zip, kept_nfd, b"");
+    let excluded_offset = append_lfh(&mut zip, excluded, b"");
+    let later_offset = append_lfh(&mut zip, later, b"");
+    let cd_offset = zip.len() as u64;
+
+    let mut cd = Vec::new();
+    cd.extend_from_slice(&make_cd_entry_raw(
+        kept_nfd,
+        &[],
+        &[],
+        0,
+        0,
+        0,
+        kept_offset as u32,
+    ));
+    cd.extend_from_slice(&make_cd_entry_raw(
+        excluded,
+        &[],
+        &[],
+        0,
+        0,
+        0,
+        excluded_offset as u32,
+    ));
+    cd.extend_from_slice(&make_cd_entry_raw(
+        later,
+        &[],
+        &[],
+        0,
+        0,
+        0,
+        later_offset as u32,
+    ));
+    zip.extend_from_slice(&cd);
+    zip.extend_from_slice(&make_eocd(0, 0, 3, 3, cd.len() as u32, cd_offset as u32, 0));
+
+    let src = unique_temp_path("fast-cd-only.zip");
+    fs::write(&src, &zip).unwrap();
+
+    let mut opts = make_options();
+    opts.fast = true;
+    process_file(src.to_str().unwrap(), &opts, &mut Vec::new()).unwrap();
+
+    let after = fs::read(&src).unwrap();
+    assert_eq!(&after[..cd_offset as usize], &zip[..cd_offset as usize]);
+
+    let entries = cd_names_and_flags(&src);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].0, "é.txt".as_bytes());
+    assert_ne!(entries[0].1 & BIT11, 0);
+    assert_eq!(entries[1].0, later);
+    assert_eq!(entries[1].1 & BIT11, 0);
+
+    assert_unzip_test_accepts(&src);
+
+    let _ = fs::remove_file(src);
 }
 
 #[test]

@@ -34,6 +34,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
     }
 
     let mut dry_run = false;
+    let mut fast = false;
     let mut not_utf8 = false;
     let mut no_default_exclude = false;
     let mut extra_excludes: Vec<String> = Vec::new();
@@ -46,6 +47,10 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
             "-h" | "--help" => return Ok(Command::Help),
             "--dry-run" => {
                 dry_run = true;
+                i += 1;
+            }
+            "--fast" => {
+                fast = true;
                 i += 1;
             }
             "--not-utf-8" => {
@@ -78,12 +83,16 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
     }
 
     let zip_path = zip_path.ok_or_else(|| "no ZIP file specified".to_string())?;
+    if fast && new_file.is_some() {
+        return Err("--fast cannot be used with --new".into());
+    }
 
     Ok(Command::Process(CliArgs {
         zip_path,
         new_file,
         options: Options {
             dry_run,
+            fast,
             not_utf8,
             no_default_exclude,
             extra_excludes,
@@ -164,6 +173,7 @@ fn print_help() {
     println!();
     println!("OPTIONS:");
     println!("  --dry-run             Show changes without modifying the file");
+    println!("  --fast                Fast in-place mode: rewrite only the Central Directory");
     println!("  --new <outfile>       Write output to a new file instead of in-place");
     println!("  --not-utf-8           Skip UTF-8 filename fixes; only remove excluded files");
     println!("  --no-default-exclude  Do not exclude .DS_Store, __MACOSX, Thumbs.db, desktop.ini");
@@ -262,6 +272,7 @@ mod tests {
                 assert_eq!(cli.zip_path, "input.zip");
                 assert_eq!(cli.new_file.as_deref(), Some("clean.zip"));
                 assert!(cli.options.dry_run);
+                assert!(!cli.options.fast);
                 assert_eq!(
                     cli.options.extra_excludes,
                     vec![".gitkeep".to_string(), "Thumbs.db".to_string()]
@@ -269,6 +280,38 @@ mod tests {
             }
             Command::Help => panic!("expected process command"),
         }
+    }
+
+    #[test]
+    fn parse_command_accepts_fast_mode() {
+        let args = vec![
+            "zipkirei".to_string(),
+            "--fast".to_string(),
+            "input.zip".to_string(),
+        ];
+
+        let command = parse_command(&args).unwrap();
+        match command {
+            Command::Process(cli) => assert!(cli.options.fast),
+            Command::Help => panic!("expected process command"),
+        }
+    }
+
+    #[test]
+    fn parse_command_rejects_fast_with_new_output() {
+        let args = vec![
+            "zipkirei".to_string(),
+            "--fast".to_string(),
+            "--new".to_string(),
+            "out.zip".to_string(),
+            "input.zip".to_string(),
+        ];
+
+        let err = match parse_command(&args) {
+            Ok(_) => panic!("expected --fast with --new error"),
+            Err(err) => err,
+        };
+        assert_eq!(err, "--fast cannot be used with --new");
     }
 
     #[test]

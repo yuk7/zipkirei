@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct Options {
     pub dry_run: bool,
+    pub fast: bool,
     pub not_utf8: bool,
     pub no_default_exclude: bool,
     pub extra_excludes: Vec<String>,

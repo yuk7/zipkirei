@@ -110,6 +110,7 @@ zipkirei [OPTIONS] <file.zip>
 | オプション             | 説明                                                         |
 | ---------------------- | ------------------------------------------------------------ |
 | `--dry-run`            | アーカイブを変更せずに計画された変更を表示する               |
+| `--fast`               | Central Directory だけを書き換える高速インプレースモード     |
 | `--new <outfile>`      | クリーンアップされたアーカイブを新しいファイルに書き出す     |
 | `--not-utf-8`          | UTF-8ファイル名の修正をスキップし、除外エントリの削除のみを行う |
 | `--no-default-exclude` | `.DS_Store`、`__MACOSX`、`Thumbs.db`、`desktop.ini` を保持する |
@@ -148,6 +149,16 @@ zipkirei archive.zip
 ```
 
 Windowsユーザーは、zipファイルをzipkireiの実行ファイルにドラッグ&ドロップすることでも実行できます。
+
+### Central Directory だけを高速にクリーンアップ
+
+```bash
+zipkirei --fast archive.zip
+```
+
+このモードでは Central Directory のメタデータだけを更新します。大きなアーカイブでは高速ですが、Local File Header は変更しないため、一部のZIPツールと互換性が低くなることがあります。
+
+`--fast --dry-run` ではローカルエントリの範囲を走査しないため、除外エントリのサイズは `? B` と表示されます。
 
 ### クリーンアップされた新しいアーカイブを書き出す
 

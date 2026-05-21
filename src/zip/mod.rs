@@ -47,6 +47,12 @@ where
     R: Read + Seek,
     W: Write + Seek,
 {
+    if opts.fast {
+        return Err(Error::from(
+            "--fast is only supported for in-place processing",
+        ));
+    }
+
     let info = find_archive_info(input, file_len)?;
     let plans = build_plans(input, &info, opts)?;
 
@@ -62,6 +68,7 @@ where
 fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), String> {
     let mut excluded_count = 0u64;
     let mut orphan_bytes = 0u64;
+    let mut orphan_bytes_unknown = false;
     let mut nfc_count = 0u64;
     let mut nfc_saved = 0u64;
     let mut bit11_count = 0u64;
@@ -70,8 +77,13 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), Stri
         let name = String::from_utf8_lossy(&p.orig_fname);
         if p.excluded {
             excluded_count += 1;
-            orphan_bytes += p.span_size;
-            writeln!(out, "[exclude]  {}  ({} B)", name, p.span_size).map_err(io_err)?;
+            if p.span_size == 0 {
+                orphan_bytes_unknown = true;
+                writeln!(out, "[exclude]  {}  (? B)", name).map_err(io_err)?;
+            } else {
+                orphan_bytes += p.span_size;
+                writeln!(out, "[exclude]  {}  ({} B)", name, p.span_size).map_err(io_err)?;
+            }
         } else {
             let delta = p.fname_delta();
             if delta > 0 {
@@ -94,10 +106,15 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), Stri
 
     writeln!(out).map_err(io_err)?;
     writeln!(out, "Summary:").map_err(io_err)?;
+    let orphan_bytes_label = if orphan_bytes_unknown {
+        "? B".to_string()
+    } else {
+        format!("{} B", orphan_bytes)
+    };
     writeln!(
         out,
-        "  Excluded:     {} entries (orphan data: {} B)",
-        excluded_count, orphan_bytes
+        "  Excluded:     {} entries (orphan data: {})",
+        excluded_count, orphan_bytes_label
     )
     .map_err(io_err)?;
     writeln!(

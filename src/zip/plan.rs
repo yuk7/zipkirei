@@ -151,6 +151,43 @@ pub(crate) fn build_plans<R: Read + Seek>(
     Ok(plans)
 }
 
+pub(crate) fn build_cd_only_plans<R: Read + Seek>(
+    r: &mut R,
+    info: &ArchiveInfo,
+    opts: &Options,
+) -> Result<Vec<EntryPlan>, String> {
+    r.seek(SeekFrom::Start(info.cd_offset)).map_err(io_err)?;
+    let entry_count = usize::try_from(info.total_entries)
+        .map_err(|_| format!("too many Central Directory entries: {}", info.total_entries))?;
+    let mut cd_consumed = 0u64;
+    let mut plans = Vec::with_capacity(entry_count);
+
+    for i in 0..info.total_entries {
+        let cd_entry = read_cd_entry_plan(r, &mut cd_consumed, info.cd_size, i, opts)?;
+        plans.push(EntryPlan {
+            cd_index: cd_entry.cd_index,
+            lhf_offset: cd_entry.lhf_offset,
+            excluded: cd_entry.excluded,
+            orig_fname: cd_entry.orig_fname,
+            new_fname: cd_entry.new_fname,
+            needs_bit11: cd_entry.needs_bit11,
+            new_bit11_set: cd_entry.new_bit11_set,
+            span_size: 0,
+            lhf_header_size: 0,
+            lhf_extra_len: 0,
+            lhf_offset_in_zip64_extra: cd_entry.lhf_offset_in_zip64_extra,
+            cd_header: cd_entry.cd_header,
+            cd_extra: cd_entry.cd_extra,
+            cd_comment: cd_entry.cd_comment,
+        });
+    }
+    if cd_consumed != info.cd_size {
+        return Err("Central Directory has trailing bytes after expected entries".to_string());
+    }
+
+    Ok(plans)
+}
+
 fn read_cd_entry_plan(
     r: &mut impl Read,
     cd_consumed: &mut u64,

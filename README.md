@@ -110,6 +110,7 @@ zipkirei [OPTIONS] <file.zip>
 | Option                 | Description                                                  |
 | ---------------------- | ------------------------------------------------------------ |
 | `--dry-run`            | Show planned changes without modifying the archive           |
+| `--fast`               | Fast in-place mode that rewrites only the Central Directory  |
 | `--new <outfile>`      | Write a cleaned archive to a new file                        |
 | `--not-utf-8`          | Skip UTF-8 filename fixes and only remove excluded entries   |
 | `--no-default-exclude` | Keep `.DS_Store`, `__MACOSX`, `Thumbs.db`, and `desktop.ini` |
@@ -148,6 +149,16 @@ zipkirei archive.zip
 ```
 
 Windows users can also run it by dragging and dropping the zip file onto the zipkirei executable.
+
+### Fast Central Directory-only cleanup
+
+```bash
+zipkirei --fast archive.zip
+```
+
+This mode updates only Central Directory metadata. It is faster on large archives, but local file headers are left unchanged, so compatibility with some ZIP tools may be reduced.
+
+In `--fast --dry-run`, excluded entry sizes are reported as `? B` because local entry spans are not scanned.
 
 ### Write a new cleaned archive
 
