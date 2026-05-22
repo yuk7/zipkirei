@@ -6,7 +6,7 @@ use super::copy::{copy_within_file, stream_copy};
 use super::eocd::{find_archive_info, parse_eocd, write_eocd, write_zip64_eocd, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::options::Options;
-use super::plan::{build_plans, normalize_for_test, resolve_lfh_offset, EntryPlan};
+use super::plan::{build_plans, normalize_for_test, resolve_lfh_offset, EntryPlan, LfhOffsetResolution};
 use super::{
     dry_run_report, process_file, process_new, BIT11, CENTRAL_DIR_SIG, EOCD_SIG,
     LOCAL_FILE_HEADER_SIG, ZIP64_EXTRA_FIELD_ID,
@@ -399,7 +399,13 @@ fn resolve_lfh_offset_reads_zip64_field() {
     let extra = make_zip64_extra(0x11, 0x22, 0x33);
     let resolved = resolve_lfh_offset(0xFFFF_FFFF, 0xFFFF_FFFF, 0xFFFF_FFFF, &extra, 1).unwrap();
 
-    assert_eq!(resolved, (0x33, true));
+    assert_eq!(
+        resolved,
+        LfhOffsetResolution {
+            offset: 0x33,
+            is_zip64: true
+        }
+    );
 }
 
 #[test]
@@ -412,7 +418,13 @@ fn resolve_lfh_offset_skips_unknown_extra_and_uses_sentinel_layout() {
 
     let resolved = resolve_lfh_offset(0x22, 0xFFFF_FFFF, 0xFFFF_FFFF, &extra, 3).unwrap();
 
-    assert_eq!(resolved, (0x44, true));
+    assert_eq!(
+        resolved,
+        LfhOffsetResolution {
+            offset: 0x44,
+            is_zip64: true
+        }
+    );
 }
 
 #[test]

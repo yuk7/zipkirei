@@ -20,14 +20,15 @@ use super::{
 const COALESCE_PADDING_LIMIT: u64 = 64 * 1024;
 
 /// In-place processing with full read+write access.
-pub fn process_file(path: &str, opts: &Options, stdout: &mut impl Write) -> ZipResult<()> {
+pub fn process_file<P: AsRef<std::path::Path>>(path: P, opts: &Options, stdout: &mut impl Write) -> ZipResult<()> {
     use std::fs::OpenOptions;
 
+    let path = path.as_ref();
     let mut f = OpenOptions::new()
         .read(true)
         .write(true)
         .open(path)
-        .map_err(|e| format!("cannot open '{}': {}", path, e))?;
+        .map_err(|e| format!("cannot open '{}': {}", path.display(), e))?;
 
     let file_len = f.seek(SeekFrom::End(0)).map_err(io_err)?;
 

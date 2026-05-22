@@ -44,6 +44,13 @@ struct LfhHeaderInfo {
     extra_len: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LfhOffsetResolution {
+    pub(crate) offset: u64,
+    pub(crate) is_zip64: bool,
+}
+
+
 impl EntryPlan {
     pub(crate) fn fname_delta(&self) -> u64 {
         self.orig_fname.len() as u64 - self.new_fname.len() as u64
@@ -238,13 +245,15 @@ fn read_cd_entry_plan(
         entry_no,
     )?;
 
-    let (lhf_offset, lhf_offset_in_zip64) = resolve_lfh_offset(
+    let res = resolve_lfh_offset(
         compressed_size_32,
         uncompressed_size_32,
         lhf_offset_32,
         &extra_buf,
         entry_no,
     )?;
+    let lhf_offset = res.offset;
+    let lhf_offset_in_zip64 = res.is_zip64;
 
     let excluded = opts.is_excluded(&fname_buf);
     let (new_fname, new_bit11_set) = if opts.not_utf8 || excluded {
@@ -322,9 +331,12 @@ pub(crate) fn resolve_lfh_offset(
     lhf32: u32,
     extra: &[u8],
     entry_no: u64,
-) -> Result<(u64, bool), String> {
+) -> Result<LfhOffsetResolution, String> {
     if lhf32 != 0xFFFF_FFFF {
-        return Ok((lhf32 as u64, false));
+        return Ok(LfhOffsetResolution {
+            offset: lhf32 as u64,
+            is_zip64: false,
+        });
     }
 
     let mut cursor = 0usize;
@@ -347,7 +359,10 @@ pub(crate) fn resolve_lfh_offset(
             if off + 8 > sz {
                 return Err(format!("ZIP64 extra too short in CD entry {}", entry_no));
             }
-            return Ok((read_u64(field, off), true));
+            return Ok(LfhOffsetResolution {
+                offset: read_u64(field, off),
+                is_zip64: true,
+            });
         }
         cursor += sz;
     }

@@ -1,10 +1,11 @@
 use crate::zip::{self, Options};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Cursor, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 
 struct CliArgs {
-    zip_path: String,
-    new_file: Option<String>,
+    zip_path: PathBuf,
+    new_file: Option<PathBuf>,
     options: Options,
 }
 
@@ -38,8 +39,8 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
     let mut not_utf8 = false;
     let mut no_default_exclude = false;
     let mut extra_excludes: Vec<String> = Vec::new();
-    let mut new_file: Option<String> = None;
-    let mut zip_path: Option<String> = None;
+    let mut new_file: Option<PathBuf> = None;
+    let mut zip_path: Option<PathBuf> = None;
 
     let mut i = 1usize;
     while i < args.len() {
@@ -66,7 +67,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             "--new" => {
-                new_file = Some(read_option_value(args, &mut i, "--new")?.to_string());
+                new_file = Some(PathBuf::from(read_option_value(args, &mut i, "--new")?));
                 i += 1;
             }
             flag if flag.starts_with('-') => {
@@ -76,7 +77,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
                 if zip_path.is_some() {
                     return Err("multiple ZIP file paths given".into());
                 }
-                zip_path = Some(path.to_string());
+                zip_path = Some(PathBuf::from(path));
                 i += 1;
             }
         }
@@ -106,14 +107,14 @@ fn execute(cli: CliArgs) -> Result<(), String> {
         Some(out_path) => {
             process_to_new_file(&cli.zip_path, out_path, &cli.options, &mut stdout)?;
             if !cli.options.dry_run {
-                eprintln!("Written to '{}'", out_path);
+                eprintln!("Written to '{}'", out_path.display());
             }
         }
         None => {
             zip::process_file(&cli.zip_path, &cli.options, &mut stdout)
                 .map_err(|e| e.to_string())?;
             if !cli.options.dry_run {
-                eprintln!("'{}' updated in place", cli.zip_path);
+                eprintln!("'{}' updated in place", cli.zip_path.display());
             }
         }
     }
@@ -122,13 +123,13 @@ fn execute(cli: CliArgs) -> Result<(), String> {
 }
 
 fn process_to_new_file(
-    zip_path: &str,
-    out_path: &str,
+    zip_path: &Path,
+    out_path: &Path,
     opts: &Options,
     stdout: &mut impl std::io::Write,
 ) -> Result<(), String> {
     let mut input =
-        File::open(zip_path).map_err(|e| format!("cannot open '{}': {}", zip_path, e))?;
+        File::open(zip_path).map_err(|e| format!("cannot open '{}': {}", zip_path.display(), e))?;
     let file_len = input
         .seek(SeekFrom::End(0))
         .map_err(|e| format!("seek error: {}", e))?;
@@ -143,12 +144,12 @@ fn process_to_new_file(
         .write(true)
         .create_new(true)
         .open(out_path)
-        .map_err(|e| format!("cannot create '{}': {}", out_path, e))?;
+        .map_err(|e| format!("cannot create '{}': {}", out_path.display(), e))?;
     let mut output = BufWriter::new(output);
     zip::process_new(&mut input, file_len, &mut output, opts, stdout).map_err(|e| e.to_string())?;
     output
         .flush()
-        .map_err(|e| format!("write error for '{}': {}", out_path, e))
+        .map_err(|e| format!("write error for '{}': {}", out_path.display(), e))
 }
 
 fn read_option_value<'a>(
@@ -269,8 +270,8 @@ mod tests {
         let command = parse_command(&args).unwrap();
         match command {
             Command::Process(cli) => {
-                assert_eq!(cli.zip_path, "input.zip");
-                assert_eq!(cli.new_file.as_deref(), Some("clean.zip"));
+                assert_eq!(cli.zip_path, Path::new("input.zip"));
+                assert_eq!(cli.new_file.as_deref(), Some(Path::new("clean.zip")));
                 assert!(cli.options.dry_run);
                 assert!(!cli.options.fast);
                 assert_eq!(
