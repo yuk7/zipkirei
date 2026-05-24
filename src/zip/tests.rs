@@ -1,6 +1,4 @@
-use super::bytes::{
-    read_u16, read_u32, read_u64, write_u16, write_u32, write_u32_slice, write_u64_slice,
-};
+use super::bytes::{read_u16, read_u32, read_u64, write_u16, write_u32, write_u64};
 use super::cd_entry::build_cd_entry;
 use super::copy::{copy_within_file, stream_copy};
 use super::eocd::{find_archive_info, parse_eocd, write_eocd, write_zip64_eocd, ArchiveInfo};
@@ -147,9 +145,9 @@ fn make_zip64_extra(uncompressed: u64, compressed: u64, lhf_offset: u64) -> Vec<
     let mut extra = vec![0u8; 4 + 24];
     write_u16(&mut extra, 0, ZIP64_EXTRA_FIELD_ID);
     write_u16(&mut extra, 2, 24);
-    write_u64_slice(&mut extra, 4, uncompressed);
-    write_u64_slice(&mut extra, 12, compressed);
-    write_u64_slice(&mut extra, 20, lhf_offset);
+    write_u64(&mut extra, 4, uncompressed);
+    write_u64(&mut extra, 12, compressed);
+    write_u64(&mut extra, 20, lhf_offset);
     extra
 }
 
@@ -171,14 +169,14 @@ fn make_cd_entry_raw(
     lhf_offset: u32,
 ) -> Vec<u8> {
     let mut raw = vec![0u8; 46];
-    write_u32_slice(&mut raw, 0, CENTRAL_DIR_SIG);
+    write_u32(&mut raw, 0, CENTRAL_DIR_SIG);
     write_u16(&mut raw, 8, flags);
-    write_u32_slice(&mut raw, 20, compressed_size);
-    write_u32_slice(&mut raw, 24, uncompressed_size);
+    write_u32(&mut raw, 20, compressed_size);
+    write_u32(&mut raw, 24, uncompressed_size);
     write_u16(&mut raw, 28, name.len() as u16);
     write_u16(&mut raw, 30, extra.len() as u16);
     write_u16(&mut raw, 32, comment.len() as u16);
-    write_u32_slice(&mut raw, 42, lhf_offset);
+    write_u32(&mut raw, 42, lhf_offset);
     raw.extend_from_slice(name);
     raw.extend_from_slice(extra);
     raw.extend_from_slice(comment);
@@ -188,9 +186,9 @@ fn make_cd_entry_raw(
 fn append_lfh(zip: &mut Vec<u8>, name: &[u8], payload: &[u8]) -> u64 {
     let offset = zip.len() as u64;
     let mut header = [0u8; 30];
-    write_u32_slice(&mut header, 0, LOCAL_FILE_HEADER_SIG);
-    write_u32_slice(&mut header, 18, payload.len() as u32);
-    write_u32_slice(&mut header, 22, payload.len() as u32);
+    write_u32(&mut header, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut header, 18, payload.len() as u32);
+    write_u32(&mut header, 22, payload.len() as u32);
     write_u16(&mut header, 26, name.len() as u16);
     zip.extend_from_slice(&header);
     zip.extend_from_slice(name);
@@ -270,7 +268,10 @@ fn find_archive_info_uses_buffered_fallback_for_commented_eocd() {
     let info = find_archive_info(&mut reader, bytes.len() as u64).unwrap();
 
     assert_eq!(info.archive_comment, comment);
-    assert_eq!(reader.read_sizes, vec![22, bytes.len(), info.archive_comment.len()]);
+    assert_eq!(
+        reader.read_sizes,
+        vec![22, bytes.len(), info.archive_comment.len()]
+    );
 }
 
 #[test]
@@ -373,7 +374,7 @@ fn parse_eocd_rejects_zip64_locator_multi_disk() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u32_slice(&mut bytes, 56 + 16, 2);
+    write_u32(&mut bytes, 56 + 16, 2);
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -390,7 +391,7 @@ fn parse_eocd_rejects_invalid_zip64_eocd_signature() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u32_slice(&mut bytes, 0, 0);
+    write_u32(&mut bytes, 0, 0);
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -407,7 +408,7 @@ fn parse_eocd_rejects_zip64_entry_count_mismatch() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u64_slice(&mut bytes, 32, 2);
+    write_u64(&mut bytes, 32, 2);
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -424,7 +425,7 @@ fn parse_eocd_rejects_too_small_zip64_eocd_record_size() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u64_slice(&mut bytes, 4, 43);
+    write_u64(&mut bytes, 4, 43);
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -441,7 +442,7 @@ fn parse_eocd_rejects_zip64_eocd_record_overlapping_locator() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u64_slice(&mut bytes, 4, 45);
+    write_u64(&mut bytes, 4, 45);
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -470,8 +471,8 @@ fn resolve_lfh_offset_reads_zip64_field() {
 fn resolve_lfh_offset_skips_unknown_extra_and_uses_sentinel_layout() {
     let mut extra = make_extra_field(0xCAFE, b"skip");
     let mut zip64_data = vec![0u8; 16];
-    write_u64_slice(&mut zip64_data, 0, 0x11);
-    write_u64_slice(&mut zip64_data, 8, 0x44);
+    write_u64(&mut zip64_data, 0, 0x11);
+    write_u64(&mut zip64_data, 8, 0x44);
     extra.extend_from_slice(&make_extra_field(ZIP64_EXTRA_FIELD_ID, &zip64_data));
 
     let resolved = resolve_lfh_offset(0x22, 0xFFFF_FFFF, 0xFFFF_FFFF, &extra, 3).unwrap();
@@ -545,7 +546,7 @@ fn build_plans_rejects_truncated_cd_entry() {
 fn build_plans_rejects_invalid_lfh_signature() {
     let mut zip = Vec::new();
     let lhf_offset = append_lfh(&mut zip, b"entry.txt", b"payload");
-    write_u32_slice(&mut zip, lhf_offset as usize, 0);
+    write_u32(&mut zip, lhf_offset as usize, 0);
     let cd_offset = zip.len() as u64;
     let cd = make_cd_entry_raw(b"entry.txt", &[], &[], 0, 7, 7, lhf_offset as u32);
     zip.extend_from_slice(&cd);
@@ -569,7 +570,7 @@ fn build_plans_rejects_truncated_lfh_filename() {
     let lhf_offset = zip.len() as u64;
     assert_eq!(lhf_offset, 56);
     let mut header = [0u8; 30];
-    write_u32_slice(&mut header, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut header, 0, LOCAL_FILE_HEADER_SIG);
     write_u16(&mut header, 26, 10);
     zip.extend_from_slice(&header);
     zip.extend_from_slice(b"abc");
@@ -1653,7 +1654,7 @@ fn process_new_preserves_data_descriptor() {
 
     // LFH with Bit 3 (0x0008)
     let mut lhf = [0u8; 30];
-    write_u32_slice(&mut lhf, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut lhf, 0, LOCAL_FILE_HEADER_SIG);
     write_u16(&mut lhf, 6, 0x0008); // Flags: Bit 3
     write_u16(&mut lhf, 26, name.len() as u16);
     zip.extend_from_slice(&lhf);
@@ -1731,7 +1732,7 @@ fn build_cd_entry_preserves_external_attributes() {
     let mut cd_raw = make_cd_entry_raw(b"test.txt", &[], &[], 0, 0, 0, 0);
     // External attributes at offset 38 (4 bytes)
     let attr = 0x81ED0000u32; // -rw-r--r-- in Unix
-    write_u32_slice(&mut cd_raw, 38, attr);
+    write_u32(&mut cd_raw, 38, attr);
 
     let plan = make_entry_plan(b"test.txt", b"test.txt", cd_raw, false, false);
     let out = build_cd_entry(&plan, 100).unwrap();
@@ -1987,7 +1988,7 @@ fn parse_eocd_rejects_multi_disk_zip64_eocd_record() {
     let mut pos = 0u64;
     write_zip64_eocd(&mut cursor, &mut pos, 1, 0, 0, b"").unwrap();
     let mut bytes = cursor.into_inner();
-    write_u32_slice(&mut bytes, 16, 1); // z64_disk = 1
+    write_u32(&mut bytes, 16, 1); // z64_disk = 1
 
     let eocd_offset = 56 + 20;
     let mut eocd = [0u8; 22];
@@ -2001,7 +2002,7 @@ fn parse_eocd_rejects_multi_disk_zip64_eocd_record() {
 #[test]
 fn patched_header_rejects_large_filename() {
     let mut header = [0u8; 30];
-    write_u32_slice(&mut header, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut header, 0, LOCAL_FILE_HEADER_SIG);
     let lhf = LocalHeader {
         header,
         extra: vec![],
@@ -2033,9 +2034,9 @@ fn parse_eocd_rejects_zip64_if_locator_signature_is_wrong() {
 fn append_lfh_with_extra(zip: &mut Vec<u8>, name: &[u8], payload: &[u8], extra: &[u8]) -> u64 {
     let offset = zip.len() as u64;
     let mut header = [0u8; 30];
-    write_u32_slice(&mut header, 0, LOCAL_FILE_HEADER_SIG);
-    write_u32_slice(&mut header, 18, payload.len() as u32);
-    write_u32_slice(&mut header, 22, payload.len() as u32);
+    write_u32(&mut header, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut header, 18, payload.len() as u32);
+    write_u32(&mut header, 22, payload.len() as u32);
     write_u16(&mut header, 26, name.len() as u16);
     write_u16(&mut header, 28, extra.len() as u16);
     zip.extend_from_slice(&header);
@@ -2138,7 +2139,7 @@ fn inplace_shifts_data_descriptor_correctly() {
 
     // LFH with Bit 3
     let mut lhf = [0u8; 30];
-    write_u32_slice(&mut lhf, 0, LOCAL_FILE_HEADER_SIG);
+    write_u32(&mut lhf, 0, LOCAL_FILE_HEADER_SIG);
     write_u16(&mut lhf, 6, 0x0008);
     write_u16(&mut lhf, 26, name.len() as u16);
     zip.extend_from_slice(&lhf);

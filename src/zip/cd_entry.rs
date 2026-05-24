@@ -1,4 +1,4 @@
-use super::bytes::{read_u16, read_u32, write_u16, write_u32_slice, write_u64_slice};
+use super::bytes::{read_u16, read_u32, write_u16, write_u32, write_u64};
 use super::plan::EntryPlan;
 use super::{checked_u16, with_bit11, Result, ZIP64_EXTRA_FIELD_ID};
 
@@ -33,7 +33,7 @@ pub(crate) fn build_cd_entry_into(
                 p.cd_index + 1
             )));
         }
-        write_u32_slice(&mut header, 42, new_lhf_offset as u32);
+        write_u32(&mut header, 42, new_lhf_offset as u32);
     }
 
     out.extend_from_slice(&header);
@@ -83,7 +83,7 @@ fn patch_zip64_lhf_offset_in_extra(
                     p.cd_index + 1
                 )));
             }
-            write_u64_slice(extra, off, new_lhf_offset);
+            write_u64(extra, off, new_lhf_offset);
             return Ok(());
         }
         cursor += sz;
