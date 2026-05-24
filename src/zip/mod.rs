@@ -12,7 +12,7 @@ mod plan;
 mod write_new;
 
 use eocd::find_archive_info;
-pub use error::{Error, Result as ZipResult};
+pub use error::{ArchiveError, Error, LimitError, Result, Result as ZipResult, UnsupportedFeature};
 pub use inplace::process_file;
 pub use options::Options;
 use plan::{build_plans, EntryPlan};
@@ -57,15 +57,15 @@ where
     let plans = build_plans(input, &info, opts)?;
 
     if opts.dry_run {
-        return dry_run_report(&plans, stdout).map_err(Error::from);
+        return dry_run_report(&plans, stdout);
     }
 
-    write_new_archive(input, output, &info, &plans).map_err(Error::from)
+    write_new_archive(input, output, &info, &plans)
 }
 
 // Dry run
 
-fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), String> {
+fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> ZipResult<()> {
     let mut excluded_count = 0u64;
     let mut orphan_bytes = 0u64;
     let mut orphan_bytes_unknown = false;
@@ -79,10 +79,10 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), Stri
             excluded_count += 1;
             if p.span_size == 0 {
                 orphan_bytes_unknown = true;
-                writeln!(out, "[exclude]  {}  (? B)", name).map_err(io_err)?;
+                writeln!(out, "[exclude]  {}  (? B)", name)?;
             } else {
                 orphan_bytes += p.span_size;
-                writeln!(out, "[exclude]  {}  ({} B)", name, p.span_size).map_err(io_err)?;
+                writeln!(out, "[exclude]  {}  ({} B)", name, p.span_size)?;
             }
         } else {
             let delta = p.fname_delta();
@@ -94,18 +94,17 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), Stri
                     out,
                     "[nfc]      {}  →  {}  ({} B shorter)",
                     name, new_name, delta
-                )
-                .map_err(io_err)?;
+                )?;
             }
             if p.needs_bit11 {
                 bit11_count += 1;
-                writeln!(out, "[bit11]    {}", name).map_err(io_err)?;
+                writeln!(out, "[bit11]    {}", name)?;
             }
         }
     }
 
-    writeln!(out).map_err(io_err)?;
-    writeln!(out, "Summary:").map_err(io_err)?;
+    writeln!(out)?;
+    writeln!(out, "Summary:")?;
     let orphan_bytes_label = if orphan_bytes_unknown {
         "? B".to_string()
     } else {
@@ -115,24 +114,18 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> Result<(), Stri
         out,
         "  Excluded:     {} entries (orphan data: {})",
         excluded_count, orphan_bytes_label
-    )
-    .map_err(io_err)?;
+    )?;
     writeln!(
         out,
         "  NFC renamed:  {} entries (total saved: {} B)",
         nfc_count, nfc_saved
-    )
-    .map_err(io_err)?;
-    writeln!(out, "  bit11 set:    {} entries", bit11_count).map_err(io_err)?;
+    )?;
+    writeln!(out, "  bit11 set:    {} entries", bit11_count)?;
 
     Ok(())
 }
 
 // I/O primitives
-
-fn io_err(e: impl std::fmt::Display) -> String {
-    format!("I/O error: {}", e)
-}
 
 #[inline]
 fn with_bit11(flags: u16, enabled: bool) -> u16 {
@@ -143,8 +136,13 @@ fn with_bit11(flags: u16, enabled: bool) -> u16 {
     }
 }
 
-fn checked_u16(value: u64, context: &str) -> std::result::Result<u16, String> {
-    u16::try_from(value).map_err(|_| format!("{context}: {value}"))
+fn checked_u16(value: u64, context: &str) -> ZipResult<u16> {
+    u16::try_from(value).map_err(|_| {
+        Error::LimitExceeded(LimitError::Value {
+            context: context.to_string(),
+            value,
+        })
+    })
 }
 
 #[cfg(test)]

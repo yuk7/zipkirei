@@ -6,14 +6,14 @@ use super::copy::stream_copy;
 use super::eocd::{write_eocd, write_zip64_eocd, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::plan::{cd_order, EntryPlan};
-use super::{checked_u16, io_err, with_bit11};
+use super::{checked_u16, with_bit11, Error, Result};
 
 pub(super) fn write_new_archive<R, W>(
     r: &mut R,
     w: &mut W,
     info: &ArchiveInfo,
     plans: &[EntryPlan],
-) -> Result<(), String>
+) -> Result<()>
 where
     R: Read + Seek,
     W: Write + Seek,
@@ -53,12 +53,16 @@ where
         if p.excluded {
             continue;
         }
-        let new_lhf = new_lhf_offsets[i]
-            .ok_or_else(|| format!("missing LFH offset for CD entry {}", p.cd_index + 1))?;
+        let new_lhf = new_lhf_offsets[i].ok_or_else(|| {
+            Error::invalid_archive(format!(
+                "missing LFH offset for CD entry {}",
+                p.cd_index + 1
+            ))
+        })?;
         cd_bytes.clear();
         cd_bytes.reserve(46 + p.new_fname.len() + p.cd_extra.len() + p.cd_comment.len());
         let cd_len = build_cd_entry_into(p, new_lhf, &mut cd_bytes)?;
-        w.write_all(&cd_bytes).map_err(io_err)?;
+        w.write_all(&cd_bytes)?;
         write_pos += cd_len as u64;
         cd_entries_written += 1;
     }

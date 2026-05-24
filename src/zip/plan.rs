@@ -5,7 +5,7 @@ use unicode_normalization::{is_nfc, UnicodeNormalization};
 use super::bytes::{read_u16, read_u32, read_u64};
 use super::eocd::ArchiveInfo;
 use super::options::Options;
-use super::{io_err, BIT11, CENTRAL_DIR_SIG, LOCAL_FILE_HEADER_SIG, ZIP64_EXTRA_FIELD_ID};
+use super::{Error, Result, BIT11, CENTRAL_DIR_SIG, LOCAL_FILE_HEADER_SIG, ZIP64_EXTRA_FIELD_ID};
 
 #[derive(Debug)]
 pub(crate) struct EntryPlan {
@@ -50,7 +50,6 @@ pub(crate) struct LfhOffsetResolution {
     pub(crate) is_zip64: bool,
 }
 
-
 impl EntryPlan {
     pub(crate) fn fname_delta(&self) -> u64 {
         self.orig_fname.len() as u64 - self.new_fname.len() as u64
@@ -61,19 +60,28 @@ impl EntryPlan {
     }
 }
 
-pub(crate) fn cd_order(plans: &[EntryPlan]) -> Result<Vec<usize>, String> {
+pub(crate) fn cd_order(plans: &[EntryPlan]) -> Result<Vec<usize>> {
     let mut order = vec![usize::MAX; plans.len()];
     for (physical_index, p) in plans.iter().enumerate() {
         if p.cd_index >= plans.len() {
-            return Err(format!("CD entry index {} is out of range", p.cd_index + 1));
+            return Err(Error::invalid_archive(format!(
+                "CD entry index {} is out of range",
+                p.cd_index + 1
+            )));
         }
         if order[p.cd_index] != usize::MAX {
-            return Err(format!("duplicate CD entry index {}", p.cd_index + 1));
+            return Err(Error::invalid_archive(format!(
+                "duplicate CD entry index {}",
+                p.cd_index + 1
+            )));
         }
         order[p.cd_index] = physical_index;
     }
     if let Some(missing) = order.iter().position(|&i| i == usize::MAX) {
-        return Err(format!("missing CD entry index {}", missing + 1));
+        return Err(Error::invalid_archive(format!(
+            "missing CD entry index {}",
+            missing + 1
+        )));
     }
     Ok(order)
 }
@@ -82,10 +90,14 @@ pub(crate) fn build_plans<R: Read + Seek>(
     r: &mut R,
     info: &ArchiveInfo,
     opts: &Options,
-) -> Result<Vec<EntryPlan>, String> {
-    r.seek(SeekFrom::Start(info.cd_offset)).map_err(io_err)?;
-    let entry_count = usize::try_from(info.total_entries)
-        .map_err(|_| format!("too many Central Directory entries: {}", info.total_entries))?;
+) -> Result<Vec<EntryPlan>> {
+    r.seek(SeekFrom::Start(info.cd_offset))?;
+    let entry_count = usize::try_from(info.total_entries).map_err(|_| {
+        Error::limit_exceeded(format!(
+            "too many Central Directory entries: {}",
+            info.total_entries
+        ))
+    })?;
     let mut cd_entries = Vec::with_capacity(entry_count);
     let mut cd_consumed = 0u64;
 
@@ -99,7 +111,9 @@ pub(crate) fn build_plans<R: Read + Seek>(
         )?);
     }
     if cd_consumed != info.cd_size {
-        return Err("Central Directory has trailing bytes after expected entries".to_string());
+        return Err(Error::invalid_archive(
+            "Central Directory has trailing bytes after expected entries",
+        ));
     }
 
     cd_entries.sort_by_key(|p| p.lhf_offset);
@@ -108,18 +122,18 @@ pub(crate) fn build_plans<R: Read + Seek>(
     for cd_entry in cd_entries {
         let lfh = read_lhf_header(r, cd_entry.lhf_offset, cd_entry.cd_index as u64 + 1)?;
         if lfh.fname.len() != cd_entry.orig_fname.len() {
-            return Err(format!(
+            return Err(Error::invalid_archive(format!(
                 "LFH filename length mismatch at entry {}: LFH has {}, CD has {}",
                 cd_entry.cd_index + 1,
                 lfh.fname.len(),
                 cd_entry.orig_fname.len()
-            ));
+            )));
         }
         if lfh.fname != cd_entry.orig_fname {
-            return Err(format!(
+            return Err(Error::invalid_archive(format!(
                 "LFH filename bytes mismatch at entry {}",
                 cd_entry.cd_index + 1
-            ));
+            )));
         }
         let lhf_header_size = 30 + lfh.fname.len() as u64 + lfh.extra_len as u64;
         plans.push(EntryPlan {
@@ -147,10 +161,10 @@ pub(crate) fn build_plans<R: Read + Seek>(
             info.cd_offset
         };
         if end < plans[i].lhf_offset + plans[i].lhf_header_size {
-            return Err(format!(
+            return Err(Error::invalid_archive(format!(
                 "entry {} has an invalid physical span",
                 plans[i].cd_index + 1
-            ));
+            )));
         }
         plans[i].span_size = end - plans[i].lhf_offset;
     }
@@ -162,10 +176,14 @@ pub(crate) fn build_cd_only_plans<R: Read + Seek>(
     r: &mut R,
     info: &ArchiveInfo,
     opts: &Options,
-) -> Result<Vec<EntryPlan>, String> {
-    r.seek(SeekFrom::Start(info.cd_offset)).map_err(io_err)?;
-    let entry_count = usize::try_from(info.total_entries)
-        .map_err(|_| format!("too many Central Directory entries: {}", info.total_entries))?;
+) -> Result<Vec<EntryPlan>> {
+    r.seek(SeekFrom::Start(info.cd_offset))?;
+    let entry_count = usize::try_from(info.total_entries).map_err(|_| {
+        Error::limit_exceeded(format!(
+            "too many Central Directory entries: {}",
+            info.total_entries
+        ))
+    })?;
     let mut cd_consumed = 0u64;
     let mut plans = Vec::with_capacity(entry_count);
 
@@ -189,7 +207,9 @@ pub(crate) fn build_cd_only_plans<R: Read + Seek>(
         });
     }
     if cd_consumed != info.cd_size {
-        return Err("Central Directory has trailing bytes after expected entries".to_string());
+        return Err(Error::invalid_archive(
+            "Central Directory has trailing bytes after expected entries",
+        ));
     }
 
     Ok(plans)
@@ -201,7 +221,7 @@ fn read_cd_entry_plan(
     cd_size: u64,
     cd_index: u64,
     opts: &Options,
-) -> Result<CdEntryPlan, String> {
+) -> Result<CdEntryPlan> {
     let entry_no = cd_index + 1;
     let mut hdr = [0u8; 46];
     read_cd_exact(
@@ -213,7 +233,10 @@ fn read_cd_entry_plan(
         entry_no,
     )?;
     if read_u32(&hdr, 0) != CENTRAL_DIR_SIG {
-        return Err(format!("invalid CD signature at entry {}", entry_no));
+        return Err(Error::invalid_archive(format!(
+            "invalid CD signature at entry {}",
+            entry_no
+        )));
     }
 
     let flags = read_u16(&hdr, 8);
@@ -286,29 +309,30 @@ fn read_cd_exact(
     out: &mut [u8],
     part: &str,
     entry_no: u64,
-) -> Result<(), String> {
-    let end = cd_consumed
-        .checked_add(out.len() as u64)
-        .ok_or_else(|| format!("Central Directory {part} length overflow at entry {entry_no}"))?;
+) -> Result<()> {
+    let end = cd_consumed.checked_add(out.len() as u64).ok_or_else(|| {
+        Error::limit_exceeded(format!(
+            "Central Directory {part} length overflow at entry {entry_no}"
+        ))
+    })?;
     if end > cd_size {
-        return Err(format!(
+        return Err(Error::invalid_archive(format!(
             "unexpected EOF reading {part} at CD entry {}",
             entry_no
-        ));
+        )));
     }
-    r.read_exact(out)
-        .map_err(|_| format!("unexpected EOF reading {part} at CD entry {}", entry_no))?;
+    r.read_exact(out).map_err(|_| {
+        Error::invalid_archive(format!(
+            "unexpected EOF reading {part} at CD entry {}",
+            entry_no
+        ))
+    })?;
     *cd_consumed = end;
     Ok(())
 }
 
-fn nfc_normalize(raw: &[u8], entry_no: u64) -> Result<Vec<u8>, String> {
-    let s = std::str::from_utf8(raw).map_err(|_| {
-        format!(
-            "entry {} has a non-UTF-8 filename; rerun with --not-utf-8 to leave filename bytes and bit 11 unchanged",
-            entry_no
-        )
-    })?;
+fn nfc_normalize(raw: &[u8], entry_no: u64) -> Result<Vec<u8>> {
+    let s = std::str::from_utf8(raw).map_err(|_| Error::NonUtf8Filename { entry_no })?;
 
     if is_nfc(s) {
         return Ok(raw.to_vec());
@@ -317,10 +341,10 @@ fn nfc_normalize(raw: &[u8], entry_no: u64) -> Result<Vec<u8>, String> {
     let nfc: String = s.nfc().collect();
     let new_bytes = nfc.into_bytes();
     if new_bytes.len() > raw.len() {
-        return Err(format!(
+        return Err(Error::limit_exceeded(format!(
             "NFC normalization increased filename size for entry {} (unexpected); aborting",
             entry_no
-        ));
+        )));
     }
     Ok(new_bytes)
 }
@@ -331,7 +355,7 @@ pub(crate) fn resolve_lfh_offset(
     lhf32: u32,
     extra: &[u8],
     entry_no: u64,
-) -> Result<LfhOffsetResolution, String> {
+) -> Result<LfhOffsetResolution> {
     if lhf32 != 0xFFFF_FFFF {
         return Ok(LfhOffsetResolution {
             offset: lhf32 as u64,
@@ -345,7 +369,10 @@ pub(crate) fn resolve_lfh_offset(
         let sz = read_u16(extra, cursor + 2) as usize;
         cursor += 4;
         if cursor + sz > extra.len() {
-            return Err(format!("truncated extra field in CD entry {}", entry_no));
+            return Err(Error::invalid_archive(format!(
+                "truncated extra field in CD entry {}",
+                entry_no
+            )));
         }
         if id == ZIP64_EXTRA_FIELD_ID {
             let field = &extra[cursor..cursor + sz];
@@ -357,7 +384,10 @@ pub(crate) fn resolve_lfh_offset(
                 off += 8;
             }
             if off + 8 > sz {
-                return Err(format!("ZIP64 extra too short in CD entry {}", entry_no));
+                return Err(Error::invalid_archive(format!(
+                    "ZIP64 extra too short in CD entry {}",
+                    entry_no
+                )));
             }
             return Ok(LfhOffsetResolution {
                 offset: read_u64(field, off),
@@ -367,39 +397,43 @@ pub(crate) fn resolve_lfh_offset(
         cursor += sz;
     }
 
-    Err(format!(
+    Err(Error::invalid_archive(format!(
         "ZIP64 extra field missing for CD entry {}",
         entry_no
-    ))
+    )))
 }
 
 fn read_lhf_header<R: Read + Seek>(
     r: &mut R,
     lhf_offset: u64,
     entry_no: u64,
-) -> Result<LfhHeaderInfo, String> {
-    r.seek(SeekFrom::Start(lhf_offset)).map_err(io_err)?;
+) -> Result<LfhHeaderInfo> {
+    r.seek(SeekFrom::Start(lhf_offset))?;
     let mut hdr = [0u8; 30];
-    r.read_exact(&mut hdr)
-        .map_err(|_| format!("unexpected EOF reading LFH at entry {}", entry_no))?;
+    r.read_exact(&mut hdr).map_err(|_| {
+        Error::invalid_archive(format!("unexpected EOF reading LFH at entry {}", entry_no))
+    })?;
     if read_u32(&hdr, 0) != LOCAL_FILE_HEADER_SIG {
-        return Err(format!(
+        return Err(Error::invalid_archive(format!(
             "invalid LFH signature at entry {} (offset {:#x})",
             entry_no, lhf_offset
-        ));
+        )));
     }
     let fname_len = read_u16(&hdr, 26) as usize;
     let extra_len = read_u16(&hdr, 28);
     let mut fname = vec![0u8; fname_len];
-    r.read_exact(&mut fname)
-        .map_err(|_| format!("unexpected EOF reading LFH filename at entry {}", entry_no))?;
-    r.seek(SeekFrom::Current(extra_len as i64))
-        .map_err(io_err)?;
+    r.read_exact(&mut fname).map_err(|_| {
+        Error::invalid_archive(format!(
+            "unexpected EOF reading LFH filename at entry {}",
+            entry_no
+        ))
+    })?;
+    r.seek(SeekFrom::Current(extra_len as i64))?;
 
     Ok(LfhHeaderInfo { fname, extra_len })
 }
 
 #[cfg(test)]
-pub(crate) fn normalize_for_test(raw: &[u8], entry_no: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn normalize_for_test(raw: &[u8], entry_no: u64) -> Result<Vec<u8>> {
     nfc_normalize(raw, entry_no)
 }

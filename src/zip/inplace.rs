@@ -13,14 +13,18 @@ use super::local_header::LocalHeader;
 use super::options::Options;
 use super::plan::{build_cd_only_plans, build_plans, cd_order, EntryPlan};
 use super::{
-    checked_u16, dry_run_report, io_err, with_bit11, Error, ZipResult, MIN_PADDING,
+    checked_u16, dry_run_report, with_bit11, Error, Result, ZipResult, MIN_PADDING,
     PADDING_EXTRA_FIELD_ID,
 };
 
 const COALESCE_PADDING_LIMIT: u64 = 64 * 1024;
 
 /// In-place processing with full read+write access.
-pub fn process_file<P: AsRef<std::path::Path>>(path: P, opts: &Options, stdout: &mut impl Write) -> ZipResult<()> {
+pub fn process_file<P: AsRef<std::path::Path>>(
+    path: P,
+    opts: &Options,
+    stdout: &mut impl Write,
+) -> ZipResult<()> {
     use std::fs::OpenOptions;
 
     let path = path.as_ref();
@@ -28,9 +32,9 @@ pub fn process_file<P: AsRef<std::path::Path>>(path: P, opts: &Options, stdout: 
         .read(true)
         .write(true)
         .open(path)
-        .map_err(|e| format!("cannot open '{}': {}", path.display(), e))?;
+        .map_err(|e| Error::io_context(format!("cannot open '{}'", path.display()), e))?;
 
-    let file_len = f.seek(SeekFrom::End(0)).map_err(io_err)?;
+    let file_len = f.seek(SeekFrom::End(0))?;
 
     let info = find_archive_info(&mut f, file_len)?;
     let plans = if opts.fast {
@@ -40,7 +44,7 @@ pub fn process_file<P: AsRef<std::path::Path>>(path: P, opts: &Options, stdout: 
     };
 
     if opts.dry_run {
-        return dry_run_report(&plans, stdout).map_err(Error::from);
+        return dry_run_report(&plans, stdout);
     }
 
     if plans
@@ -63,7 +67,7 @@ fn inplace_patch_cd_only(
     f: &mut std::fs::File,
     info: &ArchiveInfo,
     plans: &[EntryPlan],
-) -> Result<(), String> {
+) -> Result<()> {
     let mut cd_buf = Vec::with_capacity(super::COPY_BUF_SIZE.min(1024 * 1024));
     let mut cd_write_pos = info.cd_offset;
     let mut cd_entries_written: u64 = 0;
@@ -123,17 +127,12 @@ fn inplace_patch_cd_only(
         cd_write_pos += eocd.len() as u64;
     }
 
-    f.set_len(cd_write_pos)
-        .map_err(|e| format!("truncate failed: {}", e))?;
+    f.set_len(cd_write_pos)?;
 
     Ok(())
 }
 
-fn inplace_patch(
-    f: &mut std::fs::File,
-    info: &ArchiveInfo,
-    plans: &[EntryPlan],
-) -> Result<(), String> {
+fn inplace_patch(f: &mut std::fs::File, info: &ArchiveInfo, plans: &[EntryPlan]) -> Result<()> {
     let mut carry: u64 = 0;
     let mut write_pos: u64 = 0;
     let mut first = true;
@@ -268,8 +267,12 @@ fn inplace_patch(
         if p.excluded {
             continue;
         }
-        let new_lhf = new_lhf_offsets[i]
-            .ok_or_else(|| format!("missing LFH offset for CD entry {}", p.cd_index + 1))?;
+        let new_lhf = new_lhf_offsets[i].ok_or_else(|| {
+            Error::invalid_archive(format!(
+                "missing LFH offset for CD entry {}",
+                p.cd_index + 1
+            ))
+        })?;
         let before_len = cd_buf.len();
         build_cd_entry_into(p, new_lhf, &mut cd_buf)?;
         if cd_buf.len() > super::COPY_BUF_SIZE {
@@ -319,17 +322,12 @@ fn inplace_patch(
         write_all_at_portable(f, &eocd, new_cd_start + cd_size)?;
     }
 
-    f.set_len(cd_write_pos)
-        .map_err(|e| format!("truncate failed: {}", e))?;
+    f.set_len(cd_write_pos)?;
 
     Ok(())
 }
 
-fn read_local_header(
-    f: &mut std::fs::File,
-    offset: u64,
-    entry_no: usize,
-) -> Result<LocalHeader, String> {
+fn read_local_header(f: &mut std::fs::File, offset: u64, entry_no: usize) -> Result<LocalHeader> {
     #[cfg(unix)]
     {
         LocalHeader::read_from_file(f, offset, entry_no)
@@ -341,11 +339,7 @@ fn read_local_header(
     }
 }
 
-fn read_exact_at_portable(
-    f: &mut std::fs::File,
-    buf: &mut [u8],
-    offset: u64,
-) -> Result<(), String> {
+fn read_exact_at_portable(f: &mut std::fs::File, buf: &mut [u8], offset: u64) -> Result<()> {
     #[cfg(unix)]
     {
         read_exact_at(f, buf, offset)
@@ -353,12 +347,13 @@ fn read_exact_at_portable(
 
     #[cfg(not(unix))]
     {
-        f.seek(SeekFrom::Start(offset)).map_err(io_err)?;
-        f.read_exact(buf).map_err(io_err)
+        f.seek(SeekFrom::Start(offset))?;
+        f.read_exact(buf)?;
+        Ok(())
     }
 }
 
-fn write_all_at_portable(f: &mut std::fs::File, buf: &[u8], offset: u64) -> Result<(), String> {
+fn write_all_at_portable(f: &mut std::fs::File, buf: &[u8], offset: u64) -> Result<()> {
     #[cfg(unix)]
     {
         write_all_at(f, buf, offset)
@@ -366,12 +361,13 @@ fn write_all_at_portable(f: &mut std::fs::File, buf: &[u8], offset: u64) -> Resu
 
     #[cfg(not(unix))]
     {
-        f.seek(SeekFrom::Start(offset)).map_err(io_err)?;
-        f.write_all(buf).map_err(io_err)
+        f.seek(SeekFrom::Start(offset))?;
+        f.write_all(buf)?;
+        Ok(())
     }
 }
 
-fn append_padding_extra_header(out: &mut Vec<u8>, absorb: u64) -> Result<(), String> {
+fn append_padding_extra_header(out: &mut Vec<u8>, absorb: u64) -> Result<()> {
     debug_assert!(absorb >= MIN_PADDING);
     let data_len = absorb - 4;
     let data_len_u16 = checked_u16(data_len, "padding extra field exceeds ZIP limit")?;
@@ -387,12 +383,12 @@ fn write_padding_extra_data_at(
     mut pos: u64,
     absorb: u64,
     zero_buf: &mut [u8],
-) -> Result<u64, String> {
+) -> Result<u64> {
     debug_assert!(absorb >= MIN_PADDING);
     let data_len = absorb - 4;
 
     if zero_buf.is_empty() {
-        return Err("padding write buffer is empty".into());
+        return Err(Error::from("padding write buffer is empty"));
     }
     zero_buf.fill(0);
     let mut remaining = data_len;
@@ -410,7 +406,7 @@ fn append_positioned(
     f: &mut std::fs::File,
     bytes: &[u8],
     write_pos: &mut u64,
-) -> Result<(), String> {
+) -> Result<()> {
     if bytes.len() > super::COPY_BUF_SIZE {
         flush_positioned(buf, f, write_pos)?;
         write_all_at_portable(f, bytes, *write_pos)?;
@@ -425,11 +421,7 @@ fn append_positioned(
     Ok(())
 }
 
-fn flush_positioned(
-    buf: &mut Vec<u8>,
-    f: &mut std::fs::File,
-    write_pos: &mut u64,
-) -> Result<(), String> {
+fn flush_positioned(buf: &mut Vec<u8>, f: &mut std::fs::File, write_pos: &mut u64) -> Result<()> {
     if buf.is_empty() {
         return Ok(());
     }

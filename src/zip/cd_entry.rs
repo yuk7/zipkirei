@@ -1,9 +1,9 @@
 use super::bytes::{read_u16, read_u32, write_u16, write_u32_slice, write_u64_slice};
 use super::plan::EntryPlan;
-use super::{checked_u16, with_bit11, ZIP64_EXTRA_FIELD_ID};
+use super::{checked_u16, with_bit11, Result, ZIP64_EXTRA_FIELD_ID};
 
 #[cfg(test)]
-pub(crate) fn build_cd_entry(p: &EntryPlan, new_lhf_offset: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn build_cd_entry(p: &EntryPlan, new_lhf_offset: u64) -> Result<Vec<u8>> {
     let mut out =
         Vec::with_capacity(46 + p.new_fname.len() + p.cd_extra.len() + p.cd_comment.len());
     build_cd_entry_into(p, new_lhf_offset, &mut out)?;
@@ -14,7 +14,7 @@ pub(crate) fn build_cd_entry_into(
     p: &EntryPlan,
     new_lhf_offset: u64,
     out: &mut Vec<u8>,
-) -> Result<usize, String> {
+) -> Result<usize> {
     let start = out.len();
     let mut header = p.cd_header;
 
@@ -28,10 +28,10 @@ pub(crate) fn build_cd_entry_into(
 
     if !p.lhf_offset_in_zip64_extra {
         if new_lhf_offset > 0xFFFF_FFFF {
-            return Err(format!(
+            return Err(super::Error::unsupported(format!(
                 "entry {}: LFH offset grown beyond 4 GB but no ZIP64 extra field present",
                 p.cd_index + 1
-            ));
+            )));
         }
         write_u32_slice(&mut header, 42, new_lhf_offset as u32);
     }
@@ -53,7 +53,7 @@ fn patch_zip64_lhf_offset_in_extra(
     extra: &mut [u8],
     new_lhf_offset: u64,
     p: &EntryPlan,
-) -> Result<(), String> {
+) -> Result<()> {
     let comp32 = read_u32(&p.cd_header, 20);
     let uncomp32 = read_u32(&p.cd_header, 24);
 
@@ -64,10 +64,10 @@ fn patch_zip64_lhf_offset_in_extra(
         let data_start = cursor + 4;
         cursor += 4;
         if cursor + sz > extra.len() {
-            return Err(format!(
+            return Err(super::Error::invalid_archive(format!(
                 "truncated extra field patching CD entry {}",
                 p.cd_index + 1
-            ));
+            )));
         }
         if id == ZIP64_EXTRA_FIELD_ID {
             let mut off = data_start;
@@ -78,18 +78,18 @@ fn patch_zip64_lhf_offset_in_extra(
                 off += 8;
             }
             if off + 8 > data_start + sz {
-                return Err(format!(
+                return Err(super::Error::invalid_archive(format!(
                     "ZIP64 extra too short to hold LFH offset for CD entry {}",
                     p.cd_index + 1
-                ));
+                )));
             }
             write_u64_slice(extra, off, new_lhf_offset);
             return Ok(());
         }
         cursor += sz;
     }
-    Err(format!(
+    Err(super::Error::invalid_archive(format!(
         "ZIP64 extra field not found while patching CD entry {}",
         p.cd_index + 1
-    ))
+    )))
 }

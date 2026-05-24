@@ -6,10 +6,12 @@ use super::copy::{copy_within_file, stream_copy};
 use super::eocd::{find_archive_info, parse_eocd, write_eocd, write_zip64_eocd, ArchiveInfo};
 use super::local_header::LocalHeader;
 use super::options::Options;
-use super::plan::{build_plans, normalize_for_test, resolve_lfh_offset, EntryPlan, LfhOffsetResolution};
+use super::plan::{
+    build_plans, normalize_for_test, resolve_lfh_offset, EntryPlan, LfhOffsetResolution,
+};
 use super::{
-    dry_run_report, process_file, process_new, BIT11, CENTRAL_DIR_SIG, EOCD_SIG,
-    LOCAL_FILE_HEADER_SIG, ZIP64_EXTRA_FIELD_ID,
+    dry_run_report, process_file, process_new, ArchiveError, Error, LimitError, UnsupportedFeature,
+    BIT11, CENTRAL_DIR_SIG, EOCD_SIG, LOCAL_FILE_HEADER_SIG, ZIP64_EXTRA_FIELD_ID,
 };
 use std::fs::{self, File, OpenOptions};
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
@@ -205,6 +207,7 @@ fn make_entry_plan(
 fn find_archive_info_rejects_too_small_file() {
     let mut cursor = Cursor::new(vec![0u8; 21]);
     let err = find_archive_info(&mut cursor, 21).unwrap_err();
+    assert_eq!(err, Error::InvalidArchive(ArchiveError::TooSmall));
     assert_eq!(err, "file is too small to be a valid ZIP archive");
 }
 
@@ -213,6 +216,7 @@ fn find_archive_info_rejects_missing_eocd() {
     let bytes = vec![0u8; 64];
     let mut cursor = Cursor::new(bytes.clone());
     let err = find_archive_info(&mut cursor, bytes.len() as u64).unwrap_err();
+    assert_eq!(err, Error::InvalidArchive(ArchiveError::EocdNotFound));
     assert!(err.contains("End of Central Directory record not found"));
 }
 
@@ -250,6 +254,7 @@ fn parse_eocd_rejects_multi_disk_archives() {
     let eocd = make_eocd(1, 0, 1, 1, 32, 64, 0);
     let mut cursor = Cursor::new(eocd.to_vec());
     let err = parse_eocd(&mut cursor, &eocd, 0, eocd.len() as u64).unwrap_err();
+    assert_eq!(err, Error::Unsupported(UnsupportedFeature::MultiDisk));
     assert_eq!(err, "multi-disk ZIP archives are not supported");
 }
 
@@ -1949,6 +1954,13 @@ fn patched_header_rejects_large_filename() {
         extra: vec![],
     };
     let err = lhf.patched_header(0, 65536, 0).unwrap_err();
+    assert_eq!(
+        err,
+        Error::LimitExceeded(LimitError::Value {
+            context: "LFH filename length exceeds ZIP limit".to_string(),
+            value: 65536,
+        })
+    );
     assert!(err.contains("LFH filename length exceeds ZIP limit"));
 }
 

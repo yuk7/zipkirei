@@ -16,10 +16,10 @@ enum Command {
 
 pub fn run_from_env() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
-    run(&args)
+    run(&args).map_err(|e| e.to_string())
 }
 
-fn run(args: &[String]) -> Result<(), String> {
+fn run(args: &[String]) -> Result<(), zip::Error> {
     match parse_command(args)? {
         Command::Help => {
             print_help();
@@ -29,7 +29,7 @@ fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn parse_command(args: &[String]) -> Result<Command, String> {
+fn parse_command(args: &[String]) -> Result<Command, zip::Error> {
     if args.len() < 2 {
         return Ok(Command::Help);
     }
@@ -71,11 +71,11 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
                 i += 1;
             }
             flag if flag.starts_with('-') => {
-                return Err(format!("unknown option: '{}'", flag));
+                return Err(zip::Error::from(format!("unknown option: '{}'", flag)));
             }
             path => {
                 if zip_path.is_some() {
-                    return Err("multiple ZIP file paths given".into());
+                    return Err(zip::Error::from("multiple ZIP file paths given"));
                 }
                 zip_path = Some(PathBuf::from(path));
                 i += 1;
@@ -83,9 +83,9 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
         }
     }
 
-    let zip_path = zip_path.ok_or_else(|| "no ZIP file specified".to_string())?;
+    let zip_path = zip_path.ok_or_else(|| zip::Error::from("no ZIP file specified"))?;
     if fast && new_file.is_some() {
-        return Err("--fast cannot be used with --new".into());
+        return Err(zip::Error::from("--fast cannot be used with --new"));
     }
 
     Ok(Command::Process(CliArgs {
@@ -101,7 +101,7 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
     }))
 }
 
-fn execute(cli: CliArgs) -> Result<(), String> {
+fn execute(cli: CliArgs) -> Result<(), zip::Error> {
     let mut stdout = std::io::stdout();
     match cli.new_file.as_deref() {
         Some(out_path) => {
@@ -111,8 +111,7 @@ fn execute(cli: CliArgs) -> Result<(), String> {
             }
         }
         None => {
-            zip::process_file(&cli.zip_path, &cli.options, &mut stdout)
-                .map_err(|e| e.to_string())?;
+            zip::process_file(&cli.zip_path, &cli.options, &mut stdout)?;
             if !cli.options.dry_run {
                 eprintln!("'{}' updated in place", cli.zip_path.display());
             }
@@ -127,40 +126,39 @@ fn process_to_new_file(
     out_path: &Path,
     opts: &Options,
     stdout: &mut impl std::io::Write,
-) -> Result<(), String> {
-    let mut input =
-        File::open(zip_path).map_err(|e| format!("cannot open '{}': {}", zip_path.display(), e))?;
-    let file_len = input
-        .seek(SeekFrom::End(0))
-        .map_err(|e| format!("seek error: {}", e))?;
+) -> Result<(), zip::Error> {
+    let mut input = File::open(zip_path)
+        .map_err(|e| zip::Error::io_context(format!("cannot open '{}'", zip_path.display()), e))?;
+    let file_len = input.seek(SeekFrom::End(0))?;
 
     if opts.dry_run {
         let mut output = Cursor::new(Vec::new());
-        return zip::process_new(&mut input, file_len, &mut output, opts, stdout)
-            .map_err(|e| e.to_string());
+        return zip::process_new(&mut input, file_len, &mut output, opts, stdout);
     }
 
     let output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(out_path)
-        .map_err(|e| format!("cannot create '{}': {}", out_path.display(), e))?;
+        .map_err(|e| {
+            zip::Error::io_context(format!("cannot create '{}'", out_path.display()), e)
+        })?;
     let mut output = BufWriter::new(output);
-    zip::process_new(&mut input, file_len, &mut output, opts, stdout).map_err(|e| e.to_string())?;
+    zip::process_new(&mut input, file_len, &mut output, opts, stdout)?;
     output
         .flush()
-        .map_err(|e| format!("write error for '{}': {}", out_path.display(), e))
+        .map_err(|e| zip::Error::io_context(format!("write error for '{}'", out_path.display()), e))
 }
 
 fn read_option_value<'a>(
     args: &'a [String],
     index: &mut usize,
     flag: &str,
-) -> Result<&'a str, String> {
+) -> Result<&'a str, zip::Error> {
     *index += 1;
     args.get(*index)
         .map(|value| value.as_str())
-        .ok_or_else(|| format!("{flag} requires an argument"))
+        .ok_or_else(|| zip::Error::from(format!("{flag} requires an argument")))
 }
 
 fn print_help() {
@@ -247,7 +245,7 @@ mod tests {
         ];
 
         let err = run(&args).unwrap_err();
-        assert!(err.contains("cannot create"));
+        assert!(err.to_string().contains("cannot create"));
         assert_eq!(fs::read(&dst).unwrap(), original);
 
         let _ = fs::remove_file(dst);
@@ -312,7 +310,7 @@ mod tests {
             Ok(_) => panic!("expected --fast with --new error"),
             Err(err) => err,
         };
-        assert_eq!(err, "--fast cannot be used with --new");
+        assert_eq!(err.to_string(), "--fast cannot be used with --new");
     }
 
     #[test]
@@ -328,8 +326,8 @@ mod tests {
             Ok(Command::Process(_)) => panic!("expected error, got process command"),
             Err(err) => err,
         };
-        assert!(err.contains("unknown option"));
-        assert!(err.contains("--wat"));
+        assert!(err.to_string().contains("unknown option"));
+        assert!(err.to_string().contains("--wat"));
     }
 
     #[test]
@@ -339,14 +337,14 @@ mod tests {
             Ok(_) => panic!("expected exclude argument error"),
             Err(err) => err,
         };
-        assert_eq!(exclude_err, "--exclude requires an argument");
+        assert_eq!(exclude_err.to_string(), "--exclude requires an argument");
 
         let new_args = vec!["zipkirei".to_string(), "--new".to_string()];
         let new_err = match parse_command(&new_args) {
             Ok(_) => panic!("expected new argument error"),
             Err(err) => err,
         };
-        assert_eq!(new_err, "--new requires an argument");
+        assert_eq!(new_err.to_string(), "--new requires an argument");
     }
 
     #[test]
@@ -361,7 +359,7 @@ mod tests {
             Ok(_) => panic!("expected multiple path error"),
             Err(err) => err,
         };
-        assert_eq!(err, "multiple ZIP file paths given");
+        assert_eq!(err.to_string(), "multiple ZIP file paths given");
     }
 
     #[test]
@@ -370,7 +368,7 @@ mod tests {
         let args = vec!["zipkirei".to_string(), path.display().to_string()];
 
         let err = run(&args).unwrap_err();
-        assert!(err.contains("cannot open"));
-        assert!(err.contains("not-there.zip"));
+        assert!(err.to_string().contains("cannot open"));
+        assert!(err.to_string().contains("not-there.zip"));
     }
 }
