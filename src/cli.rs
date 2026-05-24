@@ -183,7 +183,7 @@ fn print_help() {
     println!("  • Set bit 11 (UTF-8 flag) on non-ASCII filenames");
     println!("  • Normalize filenames to NFC (reduces byte count for NFD-encoded names)");
     println!("  • Leave ASCII-only filenames unchanged");
-    println!("  • Remove .DS_Store, __MACOSX/*, Thumbs.db, and desktop.ini entries from the Central Directory");
+    println!("  • Remove .DS_Store, __MACOSX, Thumbs.db, and desktop.ini entries from the Central Directory");
     println!();
     println!("In-place mode patches the file with minimal I/O and truncates at the end.");
     println!("Use --dry-run to preview all changes first.");

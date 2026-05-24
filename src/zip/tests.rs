@@ -875,7 +875,7 @@ fn dry_run_report_marks_unknown_excluded_size() {
 }
 
 #[test]
-fn default_excludes_match_basename_and_macosx_prefix() {
+fn default_excludes_match_basename_and_macosx_components() {
     let opts = make_options();
 
     assert!(opts.is_excluded(b".DS_Store"));
@@ -884,8 +884,10 @@ fn default_excludes_match_basename_and_macosx_prefix() {
     assert!(opts.is_excluded(b"dir/Thumbs.db"));
     assert!(opts.is_excluded(b"__MACOSX"));
     assert!(opts.is_excluded(b"__MACOSX/path/file.txt"));
+    assert!(opts.is_excluded(b"dir/__MACOSX"));
+    assert!(opts.is_excluded(b"dir/__MACOSX/file.txt"));
 
-    assert!(!opts.is_excluded(b"dir/__MACOSX/file.txt"));
+    assert!(!opts.is_excluded(b"dir/__MACOSX_backup/file.txt"));
     assert!(!opts.is_excluded(b"notes/.DS_Store.backup"));
 }
 

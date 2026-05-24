@@ -51,7 +51,7 @@ By default, `zipkirei`:
 - sets the ZIP UTF-8 flag (bit 11) for non-ASCII filenames
 - normalizes non-ASCII UTF-8 filenames from NFD → NFC
 - leaves ASCII-only filenames untouched
-- removes `.DS_Store`, `__MACOSX/*`, `Thumbs.db`, and `desktop.ini`
+- removes `.DS_Store`, `__MACOSX`, `Thumbs.db`, and `desktop.ini`
 
 ## Features
 

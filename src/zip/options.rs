@@ -28,7 +28,7 @@ fn is_default_excluded(raw: &[u8]) -> bool {
     if base == b".DS_Store" || base == b"Thumbs.db" || base == b"desktop.ini" {
         return true;
     }
-    raw == b"__MACOSX" || raw.starts_with(b"__MACOSX/")
+    has_path_component(raw, b"__MACOSX")
 }
 
 fn last_component(raw: &[u8]) -> &[u8] {
@@ -36,4 +36,8 @@ fn last_component(raw: &[u8]) -> &[u8] {
         Some(pos) => &raw[pos + 1..],
         None => raw,
     }
+}
+
+fn has_path_component(raw: &[u8], component: &[u8]) -> bool {
+    raw.split(|&b| b == b'/').any(|part| part == component)
 }

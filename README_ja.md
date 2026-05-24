@@ -51,7 +51,7 @@ ZIPアーカイブには、他のOSでトラブルの原因となるプラット
 - 非ASCIIファイル名に ZIP UTF-8フラグ (bit 11) を設定
 - 非ASCIIのUTF-8ファイル名を NFD → NFC に正規化
 - ASCIIのみのファイル名は変更しない
-- `.DS_Store`、`__MACOSX/*`、`Thumbs.db`、`desktop.ini` を削除
+- `.DS_Store`、`__MACOSX`、`Thumbs.db`、`desktop.ini` を削除
 
 ## 特徴
 
