@@ -115,6 +115,34 @@ fn make_eocd(
     eocd
 }
 
+struct CountingReader {
+    inner: Cursor<Vec<u8>>,
+    read_sizes: Vec<usize>,
+}
+
+impl CountingReader {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            inner: Cursor::new(bytes),
+            read_sizes: Vec::new(),
+        }
+    }
+}
+
+impl Read for CountingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read_sizes.push(n);
+        Ok(n)
+    }
+}
+
+impl Seek for CountingReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
 fn make_zip64_extra(uncompressed: u64, compressed: u64, lhf_offset: u64) -> Vec<u8> {
     let mut extra = vec![0u8; 4 + 24];
     write_u16(&mut extra, 0, ZIP64_EXTRA_FIELD_ID);
@@ -218,6 +246,31 @@ fn find_archive_info_rejects_missing_eocd() {
     let err = find_archive_info(&mut cursor, bytes.len() as u64).unwrap_err();
     assert_eq!(err, Error::InvalidArchive(ArchiveError::EocdNotFound));
     assert!(err.contains("End of Central Directory record not found"));
+}
+
+#[test]
+fn find_archive_info_uses_single_read_for_commentless_eocd() {
+    let bytes = make_eocd(0, 0, 0, 0, 0, 0, 0).to_vec();
+    let mut reader = CountingReader::new(bytes.clone());
+
+    let info = find_archive_info(&mut reader, bytes.len() as u64).unwrap();
+
+    assert_eq!(info.archive_comment, Vec::<u8>::new());
+    assert_eq!(reader.read_sizes, vec![22]);
+}
+
+#[test]
+fn find_archive_info_uses_buffered_fallback_for_commented_eocd() {
+    let comment = b"archive comment".to_vec();
+    let eocd = make_eocd(0, 0, 0, 0, 0, 0, comment.len() as u16);
+    let mut bytes = eocd.to_vec();
+    bytes.extend_from_slice(&comment);
+    let mut reader = CountingReader::new(bytes.clone());
+
+    let info = find_archive_info(&mut reader, bytes.len() as u64).unwrap();
+
+    assert_eq!(info.archive_comment, comment);
+    assert_eq!(reader.read_sizes, vec![22, bytes.len(), info.archive_comment.len()]);
 }
 
 #[test]

@@ -25,23 +25,32 @@ pub(super) fn find_archive_info<R: Read + Seek>(r: &mut R, file_len: u64) -> Res
         return Err(Error::InvalidArchive(ArchiveError::TooSmall));
     }
 
-    let search_from = file_len.saturating_sub(22 + 65535);
     let mut buf = [0u8; 22];
 
-    let mut pos = file_len - 22;
-    loop {
-        r.seek(SeekFrom::Start(pos))?;
-        r.read_exact(&mut buf)?;
-        if read_u32(&buf, 0) == EOCD_SIG {
-            let comment_len = read_u16(&buf, 20) as u64;
-            if pos + 22 + comment_len == file_len {
-                return parse_eocd(r, &buf, pos, file_len);
-            }
+    let eocd_without_comment = file_len - 22;
+    r.seek(SeekFrom::Start(eocd_without_comment))?;
+    r.read_exact(&mut buf)?;
+    if read_u32(&buf, 0) == EOCD_SIG && read_u16(&buf, 20) == 0 {
+        return parse_eocd(r, &buf, eocd_without_comment, file_len);
+    }
+
+    let search_len = file_len.min(22 + 65535) as usize;
+    let search_from = file_len - search_len as u64;
+    let mut search_buf = vec![0u8; search_len];
+    r.seek(SeekFrom::Start(search_from))?;
+    r.read_exact(&mut search_buf)?;
+
+    for rel_pos in (0..=search_len - 22).rev() {
+        let candidate = &search_buf[rel_pos..rel_pos + 22];
+        if read_u32(candidate, 0) != EOCD_SIG {
+            continue;
         }
-        if pos == search_from {
-            break;
+
+        let comment_len = read_u16(candidate, 20) as usize;
+        if rel_pos + 22 + comment_len == search_len {
+            buf.copy_from_slice(candidate);
+            return parse_eocd(r, &buf, search_from + rel_pos as u64, file_len);
         }
-        pos -= 1;
     }
 
     Err(Error::InvalidArchive(ArchiveError::EocdNotFound))
