@@ -1,11 +1,11 @@
 use std::io::{Read, Write};
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(target_family = "wasm")))]
 use std::io::{Seek, SeekFrom};
 
 use super::{Result, COPY_BUF_SIZE};
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_family = "wasm")))]
 use std::os::unix::fs::FileExt;
 
 pub(super) fn stream_copy<R: Read, W: Write>(r: &mut R, w: &mut W, len: u64) -> Result<()> {
@@ -27,12 +27,13 @@ pub(super) fn stream_copy<R: Read, W: Write>(r: &mut R, w: &mut W, len: u64) -> 
 }
 
 /// Copy bytes within the same file from src to dst (src > dst guaranteed by invariant).
-#[cfg(test)]
+#[cfg(all(test, not(target_family = "wasm")))]
 pub(super) fn copy_within_file(f: &mut std::fs::File, src: u64, dst: u64, len: u64) -> Result<()> {
     let mut buf = vec![0u8; COPY_BUF_SIZE];
     copy_within_file_with_buf(f, src, dst, len, &mut buf)
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub(super) fn copy_within_file_with_buf(
     f: &mut std::fs::File,
     src: u64,
@@ -92,7 +93,7 @@ pub(super) fn copy_within_file_with_buf(
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_family = "wasm")))]
 pub(super) fn read_exact_at(f: &std::fs::File, mut buf: &mut [u8], mut offset: u64) -> Result<()> {
     while !buf.is_empty() {
         let n = f.read_at(buf, offset)?;
@@ -108,7 +109,7 @@ pub(super) fn read_exact_at(f: &std::fs::File, mut buf: &mut [u8], mut offset: u
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_family = "wasm")))]
 pub(super) fn write_all_at(f: &std::fs::File, mut buf: &[u8], mut offset: u64) -> Result<()> {
     while !buf.is_empty() {
         let n = f.write_at(buf, offset)?;

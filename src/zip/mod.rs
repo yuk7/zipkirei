@@ -5,6 +5,7 @@ mod cd_entry;
 mod copy;
 mod eocd;
 mod error;
+#[cfg(not(target_family = "wasm"))]
 mod inplace;
 mod local_header;
 mod options;
@@ -13,6 +14,7 @@ mod write_new;
 
 use eocd::find_archive_info;
 pub use error::{ArchiveError, Error, LimitError, Result, Result as ZipResult, UnsupportedFeature};
+#[cfg(not(target_family = "wasm"))]
 pub use inplace::process_file;
 pub use options::Options;
 use plan::{build_plans, EntryPlan};
