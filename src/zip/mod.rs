@@ -71,6 +71,7 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> ZipResult<()> {
     let mut orphan_bytes_unknown = false;
     let mut nfc_count = 0u64;
     let mut nfc_saved = 0u64;
+    let mut path_count = 0u64;
     let mut bit11_count = 0u64;
 
     for p in plans {
@@ -86,6 +87,7 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> ZipResult<()> {
             }
         } else {
             let delta = p.fname_delta();
+            let fname_changed = p.fname_changed();
             if delta > 0 {
                 nfc_count += 1;
                 nfc_saved += delta;
@@ -95,6 +97,11 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> ZipResult<()> {
                     "[nfc]      {}  →  {}  ({} B shorter)",
                     name, new_name, delta
                 )?;
+            }
+            if fname_changed && delta == 0 {
+                path_count += 1;
+                let new_name = String::from_utf8_lossy(&p.new_fname);
+                writeln!(out, "[path]     {}  →  {}", name, new_name)?;
             }
             if p.needs_bit11 {
                 bit11_count += 1;
@@ -120,6 +127,7 @@ fn dry_run_report<W: Write>(plans: &[EntryPlan], out: &mut W) -> ZipResult<()> {
         "  NFC renamed:  {} entries (total saved: {} B)",
         nfc_count, nfc_saved
     )?;
+    writeln!(out, "  Path fixed:   {} entries", path_count)?;
     writeln!(out, "  bit11 set:    {} entries", bit11_count)?;
 
     Ok(())

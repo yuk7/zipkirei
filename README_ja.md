@@ -50,7 +50,8 @@ ZIPアーカイブには、他のOSでトラブルの原因となるプラット
 
 - 非ASCIIファイル名に ZIP UTF-8フラグ (bit 11) を設定
 - 非ASCIIのUTF-8ファイル名を NFD → NFC に正規化
-- ASCIIのみのファイル名は変更しない
+- エントリパス内のバックスラッシュをスラッシュに正規化
+- その他のASCIIのみのファイル名は変更しない
 - `.DS_Store`、`__MACOSX`、`Thumbs.db`、`desktop.ini` を削除
 
 ## 特徴
@@ -112,7 +113,8 @@ zipkirei [OPTIONS] <file.zip>
 | `--dry-run`            | アーカイブを変更せずに計画された変更を表示する               |
 | `--fast`               | Central Directory だけを書き換える高速インプレースモード     |
 | `--new <outfile>`      | クリーンアップされたアーカイブを新しいファイルに書き出す     |
-| `--not-utf-8`          | UTF-8ファイル名の修正をスキップし、除外エントリの削除のみを行う |
+| `--not-utf-8`          | UTF-8ファイル名の修正をスキップする                          |
+| `--keep-backslashes`   | エントリパス内のバックスラッシュを保持する                   |
 | `--no-default-exclude` | `.DS_Store`、`__MACOSX`、`Thumbs.db`、`desktop.ini` を保持する |
 | `--exclude <name>`     | `<name>` に一致するエントリも除外する（複数指定可）          |
 | `-h`, `--help`         | ヘルプを表示する                                             |
@@ -139,6 +141,7 @@ zipkirei --dry-run archive.zip
 Summary:
   Excluded:     2 entries
   NFC renamed:  2 entries
+  Path fixed:   0 entries
   bit11 set:    3 entries
 ```
 

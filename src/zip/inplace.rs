@@ -49,7 +49,7 @@ pub fn process_file<P: AsRef<std::path::Path>>(
 
     if plans
         .iter()
-        .all(|p| !p.excluded && p.fname_delta() == 0 && !p.needs_bit11)
+        .all(|p| !p.excluded && !p.fname_changed() && !p.needs_bit11)
     {
         return Ok(());
     }
@@ -226,6 +226,9 @@ fn inplace_patch(f: &mut std::fs::File, info: &ArchiveInfo, plans: &[EntryPlan])
             read_exact_at_portable(f, &mut flags_buf, p.lhf_offset + 6)?;
             let new_flags = with_bit11(read_u16(&flags_buf, 0), p.new_bit11_set);
             write_all_at_portable(f, &new_flags.to_le_bytes(), p.lhf_offset + 6)?;
+            if p.fname_changed() {
+                write_all_at_portable(f, &p.new_fname, p.lhf_offset + 30)?;
+            }
 
             write_pos = p.lhf_offset + p.span_size;
         } else {

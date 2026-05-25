@@ -55,6 +55,10 @@ impl EntryPlan {
         self.orig_fname.len() as u64 - self.new_fname.len() as u64
     }
 
+    pub(crate) fn fname_changed(&self) -> bool {
+        self.orig_fname != self.new_fname
+    }
+
     pub(crate) fn payload_size(&self) -> u64 {
         self.span_size - self.lhf_header_size
     }
@@ -279,12 +283,10 @@ fn read_cd_entry_plan(
     let lhf_offset_in_zip64 = res.is_zip64;
 
     let excluded = opts.is_excluded(&fname_buf);
-    let (new_fname, new_bit11_set) = if opts.not_utf8 || excluded {
+    let (new_fname, new_bit11_set) = if excluded {
         (fname_buf.clone(), (flags & BIT11) != 0)
-    } else if fname_buf.is_ascii() {
-        (fname_buf.clone(), false)
     } else {
-        (nfc_normalize(&fname_buf, entry_no)?, true)
+        normalize_filename(&fname_buf, flags, entry_no, opts)?
     };
 
     Ok(CdEntryPlan {
@@ -329,6 +331,32 @@ fn read_cd_exact(
     })?;
     *cd_consumed = end;
     Ok(())
+}
+
+fn normalize_filename(
+    raw: &[u8],
+    flags: u16,
+    entry_no: u64,
+    opts: &Options,
+) -> Result<(Vec<u8>, bool)> {
+    let slash_normalized = if opts.keep_backslashes || !raw.contains(&b'\\') {
+        raw.to_vec()
+    } else {
+        raw.iter()
+            .map(|&b| if b == b'\\' { b'/' } else { b })
+            .collect()
+    };
+
+    if opts.not_utf8 {
+        return Ok((slash_normalized, (flags & BIT11) != 0));
+    }
+
+    if slash_normalized.is_ascii() {
+        return Ok((slash_normalized, false));
+    }
+
+    let nfc = nfc_normalize(&slash_normalized, entry_no)?;
+    Ok((nfc, true))
 }
 
 fn nfc_normalize(raw: &[u8], entry_no: u64) -> Result<Vec<u8>> {

@@ -3,6 +3,7 @@ pub struct Options {
     pub dry_run: bool,
     pub fast: bool,
     pub not_utf8: bool,
+    pub keep_backslashes: bool,
     pub no_default_exclude: bool,
     pub extra_excludes: Vec<String>,
 }
@@ -32,12 +33,13 @@ fn is_default_excluded(raw: &[u8]) -> bool {
 }
 
 fn last_component(raw: &[u8]) -> &[u8] {
-    match raw.iter().rposition(|&b| b == b'/') {
+    match raw.iter().rposition(|&b| b == b'/' || b == b'\\') {
         Some(pos) => &raw[pos + 1..],
         None => raw,
     }
 }
 
 fn has_path_component(raw: &[u8], component: &[u8]) -> bool {
-    raw.split(|&b| b == b'/').any(|part| part == component)
+    raw.split(|&b| b == b'/' || b == b'\\')
+        .any(|part| part == component)
 }

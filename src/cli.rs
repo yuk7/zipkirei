@@ -37,6 +37,7 @@ fn parse_command(args: &[String]) -> Result<Command, zip::Error> {
     let mut dry_run = false;
     let mut fast = false;
     let mut not_utf8 = false;
+    let mut keep_backslashes = false;
     let mut no_default_exclude = false;
     let mut extra_excludes: Vec<String> = Vec::new();
     let mut new_file: Option<PathBuf> = None;
@@ -56,6 +57,10 @@ fn parse_command(args: &[String]) -> Result<Command, zip::Error> {
             }
             "--not-utf-8" => {
                 not_utf8 = true;
+                i += 1;
+            }
+            "--keep-backslashes" => {
+                keep_backslashes = true;
                 i += 1;
             }
             "--no-default-exclude" => {
@@ -95,6 +100,7 @@ fn parse_command(args: &[String]) -> Result<Command, zip::Error> {
             dry_run,
             fast,
             not_utf8,
+            keep_backslashes,
             no_default_exclude,
             extra_excludes,
         },
@@ -174,15 +180,17 @@ fn print_help() {
     println!("  --dry-run             Show changes without modifying the file");
     println!("  --fast                Fast in-place mode: rewrite only the Central Directory");
     println!("  --new <outfile>       Write output to a new file instead of in-place");
-    println!("  --not-utf-8           Skip UTF-8 filename fixes; only remove excluded files");
+    println!("  --not-utf-8           Skip UTF-8 filename fixes");
+    println!("  --keep-backslashes    Do not normalize backslashes in entry paths");
     println!("  --no-default-exclude  Do not exclude .DS_Store, __MACOSX, Thumbs.db, desktop.ini");
     println!("  --exclude <name>      Exclude entries whose basename matches <name> (repeatable)");
     println!("  -h, --help            Show this help");
     println!();
-    println!("DEFAULT BEHAVIOUR (without --not-utf-8):");
+    println!("DEFAULT BEHAVIOUR:");
     println!("  • Set bit 11 (UTF-8 flag) on non-ASCII filenames");
     println!("  • Normalize filenames to NFC (reduces byte count for NFD-encoded names)");
-    println!("  • Leave ASCII-only filenames unchanged");
+    println!("  • Normalize backslashes in entry paths to slashes");
+    println!("  • Leave other ASCII-only filenames unchanged");
     println!("  • Remove .DS_Store, __MACOSX, Thumbs.db, and desktop.ini entries from the Central Directory");
     println!();
     println!("In-place mode patches the file with minimal I/O and truncates at the end.");
@@ -272,6 +280,7 @@ mod tests {
                 assert_eq!(cli.new_file.as_deref(), Some(Path::new("clean.zip")));
                 assert!(cli.options.dry_run);
                 assert!(!cli.options.fast);
+                assert!(!cli.options.keep_backslashes);
                 assert_eq!(
                     cli.options.extra_excludes,
                     vec![".gitkeep".to_string(), "Thumbs.db".to_string()]
@@ -292,6 +301,21 @@ mod tests {
         let command = parse_command(&args).unwrap();
         match command {
             Command::Process(cli) => assert!(cli.options.fast),
+            Command::Help => panic!("expected process command"),
+        }
+    }
+
+    #[test]
+    fn parse_command_accepts_keep_backslashes() {
+        let args = vec![
+            "zipkirei".to_string(),
+            "--keep-backslashes".to_string(),
+            "input.zip".to_string(),
+        ];
+
+        let command = parse_command(&args).unwrap();
+        match command {
+            Command::Process(cli) => assert!(cli.options.keep_backslashes),
             Command::Help => panic!("expected process command"),
         }
     }

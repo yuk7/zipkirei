@@ -87,6 +87,7 @@ fn make_options() -> Options {
         dry_run: false,
         fast: false,
         not_utf8: false,
+        keep_backslashes: false,
         no_default_exclude: false,
         extra_excludes: Vec::new(),
     }
@@ -882,10 +883,12 @@ fn default_excludes_match_basename_and_macosx_components() {
     assert!(opts.is_excluded(b"nested/.DS_Store"));
     assert!(opts.is_excluded(b"Thumbs.db"));
     assert!(opts.is_excluded(b"dir/Thumbs.db"));
+    assert!(opts.is_excluded(b"dir\\Thumbs.db"));
     assert!(opts.is_excluded(b"__MACOSX"));
     assert!(opts.is_excluded(b"__MACOSX/path/file.txt"));
     assert!(opts.is_excluded(b"dir/__MACOSX"));
     assert!(opts.is_excluded(b"dir/__MACOSX/file.txt"));
+    assert!(opts.is_excluded(b"dir\\__MACOSX\\file.txt"));
 
     assert!(!opts.is_excluded(b"dir/__MACOSX_backup/file.txt"));
     assert!(!opts.is_excluded(b"notes/.DS_Store.backup"));
@@ -906,6 +909,7 @@ fn no_default_exclude_disables_builtin_filters() {
     assert!(!opts.is_excluded(b".DS_Store"));
     assert!(!opts.is_excluded(b"nested/Thumbs.db"));
     assert!(!opts.is_excluded(b"__MACOSX/file.txt"));
+    assert!(!opts.is_excluded(b"__MACOSX\\file.txt"));
 }
 
 #[test]
@@ -916,6 +920,7 @@ fn extra_excludes_match_basename_only() {
 
     assert!(opts.is_excluded(b"keep.out"));
     assert!(opts.is_excluded(b"nested/keep.out"));
+    assert!(opts.is_excluded(b"nested\\keep.out"));
     assert!(!opts.is_excluded(b"keep.out/child.txt"));
     assert!(!opts.is_excluded(b"nested/keep.out.backup"));
 }
@@ -1340,6 +1345,35 @@ fn inplace_writes_padding_extra_when_absorb_reaches_minimum() {
 }
 
 #[test]
+fn inplace_normalizes_backslashes_without_size_delta() {
+    let src = unique_temp_path("backslash-inplace.zip");
+    let name = b"dir\\file.txt";
+    let mut zip = Vec::new();
+    let lhf_offset = append_lfh(&mut zip, name, b"");
+    let cd_offset = zip.len() as u64;
+    let cd = make_cd_entry_raw(name, &[], &[], 0, 0, 0, lhf_offset as u32);
+    zip.extend_from_slice(&cd);
+    zip.extend_from_slice(&make_eocd(0, 0, 1, 1, cd.len() as u32, cd_offset as u32, 0));
+    fs::write(&src, zip).unwrap();
+
+    process_file(src.to_str().unwrap(), &make_options(), &mut Vec::new()).unwrap();
+
+    let mut file = File::open(&src).unwrap();
+    let file_len = fs::metadata(&src).unwrap().len();
+    let info = find_archive_info(&mut file, file_len).unwrap();
+    let plans = build_plans(&mut file, &info, &make_options()).unwrap();
+    let (lfh_name, lfh_flags) = lfh_name_and_flags_at(&src, plans[0].lhf_offset);
+
+    assert_eq!(plans[0].orig_fname, b"dir/file.txt");
+    assert_eq!(lfh_name, b"dir/file.txt");
+    assert_eq!(lfh_flags & BIT11, 0);
+
+    assert_unzip_test_accepts(&src);
+
+    let _ = fs::remove_file(src);
+}
+
+#[test]
 fn inplace_accumulates_small_carry_until_padding_is_possible() {
     let src = unique_temp_path("carry-accumulate.zip");
     let names: [&[u8]; 3] = [
@@ -1579,6 +1613,73 @@ fn process_new_leaves_ascii_names_without_bit11() {
     let info = find_archive_info(&mut file, len).unwrap();
     let plans = build_plans(&mut file, &info, &make_options()).unwrap();
 
+    assert_eq!(plans[0].new_fname, name);
+    assert!(!plans[0].new_bit11_set);
+}
+
+#[test]
+fn process_new_normalizes_backslashes_to_slashes() {
+    let name = b"dir\\file.txt";
+    let mut zip = Vec::new();
+    let off = append_lfh(&mut zip, name, b"data");
+    let cd_off = zip.len() as u64;
+    let cd = make_cd_entry_raw(name, &[], &[], 0, 4, 4, off as u32);
+    zip.extend_from_slice(&cd);
+    zip.extend_from_slice(&make_eocd(0, 0, 1, 1, cd.len() as u32, cd_off as u32, 0));
+
+    let mut input = Cursor::new(zip.clone());
+    let mut output = Cursor::new(Vec::new());
+    process_new(
+        &mut input,
+        zip.len() as u64,
+        &mut output,
+        &make_options(),
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let out = output.into_inner();
+    let mut file = Cursor::new(out);
+    let len = file.get_ref().len() as u64;
+    let info = find_archive_info(&mut file, len).unwrap();
+    let plans = build_plans(&mut file, &info, &make_options()).unwrap();
+
+    assert_eq!(plans[0].orig_fname, b"dir/file.txt");
+    assert_eq!(plans[0].new_fname, b"dir/file.txt");
+    assert!(!plans[0].new_bit11_set);
+}
+
+#[test]
+fn keep_backslashes_preserves_backslashes() {
+    let name = b"dir\\file.txt";
+    let mut zip = Vec::new();
+    let off = append_lfh(&mut zip, name, b"data");
+    let cd_off = zip.len() as u64;
+    let cd = make_cd_entry_raw(name, &[], &[], 0, 4, 4, off as u32);
+    zip.extend_from_slice(&cd);
+    zip.extend_from_slice(&make_eocd(0, 0, 1, 1, cd.len() as u32, cd_off as u32, 0));
+
+    let mut opts = make_options();
+    opts.keep_backslashes = true;
+
+    let mut input = Cursor::new(zip.clone());
+    let mut output = Cursor::new(Vec::new());
+    process_new(
+        &mut input,
+        zip.len() as u64,
+        &mut output,
+        &opts,
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let out = output.into_inner();
+    let mut file = Cursor::new(out);
+    let len = file.get_ref().len() as u64;
+    let info = find_archive_info(&mut file, len).unwrap();
+    let plans = build_plans(&mut file, &info, &opts).unwrap();
+
+    assert_eq!(plans[0].orig_fname, name);
     assert_eq!(plans[0].new_fname, name);
     assert!(!plans[0].new_bit11_set);
 }
