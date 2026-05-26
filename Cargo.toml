@@ -1,6 +1,6 @@
 [package]
 name = "zipkirei"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Tool to clean up ZIP archives: NFC normalization, UTF-8 filename flags, and junk file removal"
 authors = ["yuk7 <yukx00@gmail.com>"]
