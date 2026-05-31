@@ -15,6 +15,7 @@
 ### [⬇ ダウンロード](https://github.com/yuk7/zipkirei/releases/latest)
 [⬇ GitHub Releases](https://github.com/yuk7/zipkirei/releases/latest)
 [📦 Crates.io](https://crates.io/crates/zipkirei)
+[🌐 ブラウザで試す](https://yuk7.dev/zipkirei)
 
 ### 対応環境
 | OS      | Architecture                        |

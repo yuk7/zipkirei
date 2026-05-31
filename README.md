@@ -15,6 +15,7 @@ Fix mojibake, decomposed Unicode filenames, and OS junk entries in milliseconds.
 ### [⬇ Download](https://github.com/yuk7/zipkirei/releases/latest)
 [⬇ GitHub Releases](https://github.com/yuk7/zipkirei/releases/latest)
 [📦 Crates.io](https://crates.io/crates/zipkirei)
+[🌐 Try it in the web browser](https://yuk7.dev/zipkirei)
 
 ### Supported Platforms
 | OS      | Architecture                        |
