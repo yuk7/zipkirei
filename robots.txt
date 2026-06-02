@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://yuk7.dev/zipkirei/sitemap.xml
