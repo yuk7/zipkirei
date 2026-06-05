@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://yuk7.dev/zipkirei/sitemap.xml
+Sitemap: https://zipkirei.yuk7.dev/sitemap.xml
