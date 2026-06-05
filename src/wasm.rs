@@ -27,6 +27,7 @@ pub fn repair_zip(
     dry_run: bool,
     not_utf8: bool,
     keep_backslashes: bool,
+    no_default_exclude: bool,
 ) -> Result<RepairResult, JsValue> {
     let mut input = Cursor::new(zip_data.to_vec());
     let file_len = zip_data.len() as u64;
@@ -38,7 +39,7 @@ pub fn repair_zip(
         fast: false, // not supported in WASM
         not_utf8,
         keep_backslashes,
-        no_default_exclude: false,
+        no_default_exclude,
         extra_excludes: Vec::new(),
     };
 
